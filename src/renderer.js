@@ -114,6 +114,8 @@ export class AsciiRenderer {
     this.viewH = 1;
     this.originX = 0;
     this.originY = 0;
+    this.gridCols = 0;
+    this.gridRows = 0;
     this.gridSize = [1, 1];
     this.charW = 0;
     this.charH = 0;
@@ -181,6 +183,7 @@ export class AsciiRenderer {
 
     for (let code = 33; code < 127; code++) {
       const ch = String.fromCharCode(code);
+      if (ch === "-" || ch === "|" || ch === "+") continue;
       const col = code % ATLAS_COLS;
       const row = Math.floor(code / ATLAS_COLS);
       const metrics = ctx.measureText(ch);
@@ -190,6 +193,24 @@ export class AsciiRenderer {
       const x = col * cellW + (cellW - glyphW) / 2;
       const y = row * cellH + (cellH + ascent - descent) / 2;
       ctx.fillText(ch, x, y);
+    }
+
+    const thickness = Math.max(1, Math.round(Math.min(cellW, cellH) * 0.16));
+    const midX = Math.floor((cellW - thickness) / 2);
+    const midY = Math.floor((cellH - thickness) / 2);
+    const roads = [
+      ["-", (x, y) => ctx.fillRect(x, y + midY, cellW, thickness)],
+      ["|", (x, y) => ctx.fillRect(x + midX, y, thickness, cellH)],
+      ["+", (x, y) => {
+        ctx.fillRect(x, y + midY, cellW, thickness);
+        ctx.fillRect(x + midX, y, thickness, cellH);
+      }],
+    ];
+    for (const [ch, draw] of roads) {
+      const code = ch.charCodeAt(0);
+      const col = code % ATLAS_COLS;
+      const row = Math.floor(code / ATLAS_COLS);
+      draw(col * cellW, row * cellH);
     }
 
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
@@ -219,6 +240,9 @@ export class AsciiRenderer {
     this.viewH = rows * cellH;
     this.originX = Math.floor((bufW - this.viewW) / 2);
     this.originY = Math.floor((bufH - this.viewH) / 2);
+    this.gridCols = cols;
+    this.gridRows = rows;
+    this.dpr = dpr;
 
     if (cellW !== this.cellW || cellH !== this.cellH) {
       this.cellW = cellW;
@@ -227,6 +251,34 @@ export class AsciiRenderer {
     }
 
     return { cols, rows };
+  }
+
+  cellAt(clientX, clientY) {
+    const rect = this.canvas.getBoundingClientRect();
+    const cssX = clientX - rect.left;
+    const cssY = clientY - rect.top;
+    const scaleX = this.canvas.width / Math.max(1, rect.width);
+    const scaleY = this.canvas.height / Math.max(1, rect.height);
+    const bufX = cssX * scaleX;
+    const bufY = cssY * scaleY;
+    const localX = bufX - this.originX;
+    const localY = bufY - this.originY;
+    if (
+      localX < 0 ||
+      localY < 0 ||
+      localX >= this.viewW ||
+      localY >= this.viewH ||
+      this.cellW <= 0 ||
+      this.cellH <= 0
+    ) {
+      return null;
+    }
+    const col = Math.floor(localX / this.cellW);
+    const row = Math.floor(localY / this.cellH);
+    if (col < 0 || row < 0 || col >= this.gridCols || row >= this.gridRows) {
+      return null;
+    }
+    return { col, row };
   }
 
   upload(grid) {
