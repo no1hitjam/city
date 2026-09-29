@@ -1,8 +1,8 @@
 import { SymbolGrid } from "./grid.js";
 import { AsciiRenderer } from "./renderer.js";
 import {
-  BLOCK_W,
-  BLOCK_H,
+  STRIDE_X,
+  STRIDE_Y,
   mapSize,
   cellChar,
   roadAt,
@@ -100,8 +100,8 @@ function endDrag(event) {
 
 window.addEventListener("keydown", (event) => {
   if (event.ctrlKey || event.metaKey || event.altKey) return;
-  const stepX = event.shiftKey ? BLOCK_W + 1 : 1;
-  const stepY = event.shiftKey ? BLOCK_H + 1 : 1;
+  const stepX = event.shiftKey ? STRIDE_X : 1;
+  const stepY = event.shiftKey ? STRIDE_Y : 1;
   if (event.key === "ArrowLeft") camX -= stepX;
   else if (event.key === "ArrowRight") camX += stepX;
   else if (event.key === "ArrowUp") camY -= stepY;
