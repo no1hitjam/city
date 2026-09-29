@@ -80,15 +80,6 @@ function blockLocalAt(x, y) {
   return { bx, by, lx, ly };
 }
 
-function outerEdgeAt(lx, ly) {
-  const onWest = lx === 0;
-  const onEast = lx === OUTER_W - 1;
-  const onNorth = ly === 0;
-  const onSouth = ly === OUTER_H - 1;
-  if (!onWest && !onEast && !onNorth && !onSouth) return null;
-  return { onWest, onEast, onNorth, onSouth };
-}
-
 function inSidewalk(lx, ly) {
   const inLot =
     lx > INNER_MIN &&
@@ -96,6 +87,15 @@ function inSidewalk(lx, ly) {
     ly > INNER_MIN &&
     ly < INNER_MAX_Y;
   return !inLot;
+}
+
+function sidewalkRoadAt(lx, ly, bx, by) {
+  const result = { avenue: -1, street: -1 };
+  if (lx <= INNER_MIN) result.avenue = bx;
+  if (lx >= INNER_MAX_X) result.avenue = bx + 1;
+  if (ly <= INNER_MIN) result.street = by + 1;
+  if (ly >= INNER_MAX_Y) result.street = by;
+  return result;
 }
 
 export function cellChar(x, y) {
@@ -144,16 +144,8 @@ export function roadAt(x, y) {
   }
 
   const block = blockLocalAt(x, y);
-  if (block) {
-    const outer = outerEdgeAt(block.lx, block.ly);
-    if (outer) {
-      const result = { avenue: -1, street: -1 };
-      if (outer.onWest) result.avenue = block.bx;
-      if (outer.onEast) result.avenue = block.bx + 1;
-      if (outer.onSouth) result.street = block.by;
-      if (outer.onNorth) result.street = block.by + 1;
-      return result;
-    }
+  if (block && inSidewalk(block.lx, block.ly)) {
+    return sidewalkRoadAt(block.lx, block.ly, block.bx, block.by);
   }
 
   return roadCorridorAt(x, y);
