@@ -1,4 +1,4 @@
-import { MAT_SIDEWALK } from "./materials.js";
+import { MAT_SIDEWALK, MAT_STREETLAMP } from "./materials.js";
 
 export const BLOCKS_X = 100;
 export const BLOCKS_Y = 100;
@@ -10,6 +10,7 @@ export const ROAD_H = 3;
 const OUTER_W = BLOCK_W + 2;
 const OUTER_H = BLOCK_H + 2;
 const SIDEWALK_D = 2;
+const LAMP_INTERVAL = 16;
 const INNER_MIN = SIDEWALK_D + 1;
 const INNER_MAX_X = OUTER_W - SIDEWALK_D - 2;
 const INNER_MAX_Y = OUTER_H - SIDEWALK_D - 2;
@@ -89,6 +90,26 @@ function inSidewalk(lx, ly) {
   return !inLot;
 }
 
+function isStreetlamp(lx, ly, x, y) {
+  const onNorth = ly <= INNER_MIN;
+  const onSouth = ly >= INNER_MAX_Y;
+  const onWest = lx <= INNER_MIN;
+  const onEast = lx >= INNER_MAX_X;
+  const northRow = ly === 0;
+  const southRow = ly === OUTER_H - 1;
+  const westCol = lx === 0;
+  const eastCol = lx === OUTER_W - 1;
+  const corner = (northRow || southRow) && (westCol || eastCol);
+
+  if ((onNorth && northRow) || (onSouth && southRow)) {
+    if (!corner && x % LAMP_INTERVAL === 0) return true;
+  }
+  if ((onWest && westCol) || (onEast && eastCol)) {
+    if (y % LAMP_INTERVAL === 0) return true;
+  }
+  return false;
+}
+
 function sidewalkRoadAt(lx, ly, bx, by) {
   const result = { avenue: -1, street: -1 };
   if (lx <= INNER_MIN) result.avenue = bx;
@@ -102,7 +123,10 @@ export function cellChar(x, y) {
   const block = blockLocalAt(x, y);
   if (!block) return " ";
 
-  if (inSidewalk(block.lx, block.ly)) return MAT_SIDEWALK.char;
+  if (inSidewalk(block.lx, block.ly)) {
+    if (isStreetlamp(block.lx, block.ly, x, y)) return MAT_STREETLAMP.char;
+    return MAT_SIDEWALK.char;
+  }
   return " ";
 }
 

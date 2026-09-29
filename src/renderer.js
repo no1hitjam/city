@@ -209,9 +209,28 @@ export class AsciiRenderer {
       ctx.fillText(ch, x, y);
     }
 
-    const customGlyphs = MATERIALS.filter((mat) => mat.fill === "block").map(
-      (mat) => [mat.char, (x, y) => ctx.fillRect(x, y, cellSize, cellSize)]
-    );
+    const customGlyphs = MATERIALS.filter((mat) => mat.fill).map((mat) => {
+      const col = mat.char.charCodeAt(0) % ATLAS_COLS;
+      const row = Math.floor(mat.char.charCodeAt(0) / ATLAS_COLS);
+      const ox = col * cellSize;
+      const oy = row * cellSize;
+      if (mat.fill === "block") {
+        return [mat.char, () => ctx.fillRect(ox, oy, cellSize, cellSize)];
+      }
+      if (mat.fill === "circle") {
+        const cx = ox + cellSize / 2;
+        const cy = oy + cellSize / 2;
+        return [
+          mat.char,
+          () => {
+            ctx.beginPath();
+            ctx.arc(cx, cy, cellSize * 0.38, 0, Math.PI * 2);
+            ctx.fill();
+          },
+        ];
+      }
+      return null;
+    }).filter(Boolean);
     for (const [ch, draw] of customGlyphs) {
       const code = ch.charCodeAt(0);
       const col = code % ATLAS_COLS;
