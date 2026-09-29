@@ -10,4 +10,10 @@ export const MAT_STREETLAMP = {
   fill: "circle",
 };
 
-export const MATERIALS = [MAT_SIDEWALK, MAT_STREETLAMP];
+export const MAT_SKYSCRAPER = {
+  char: "H",
+  color: [0x7a / 255, 0x9e / 255, 0x6e / 255],
+  fill: "block",
+};
+
+export const MATERIALS = [MAT_SIDEWALK, MAT_STREETLAMP, MAT_SKYSCRAPER];

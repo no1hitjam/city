@@ -1,4 +1,4 @@
-import { MAT_SIDEWALK, MAT_STREETLAMP } from "./materials.js";
+import { MAT_SIDEWALK, MAT_STREETLAMP, MAT_SKYSCRAPER } from "./materials.js";
 
 export const BLOCKS_X = 100;
 export const BLOCKS_Y = 100;
@@ -14,8 +14,18 @@ const LAMP_INTERVAL = 16;
 const INNER_MIN = SIDEWALK_D + 1;
 const INNER_MAX_X = OUTER_W - SIDEWALK_D - 2;
 const INNER_MAX_Y = OUTER_H - SIDEWALK_D - 2;
+const LOT_X0 = INNER_MIN + 1;
+const LOT_Y0 = INNER_MIN + 1;
+const LOT_X1 = INNER_MAX_X;
+const LOT_Y1 = INNER_MAX_Y;
+const BUILDING_GAP = 1;
+const BUILDING_MIN_W = 8;
+const BUILDING_MIN_D = 5;
+const BUILDING_MAX_W = 40;
 export const STRIDE_X = OUTER_W + ROAD_W;
 export const STRIDE_Y = OUTER_H + ROAD_H;
+
+const buildingsCache = new Map();
 
 function ordinal(n) {
   const tens = n % 100;
@@ -119,6 +129,109 @@ function sidewalkRoadAt(lx, ly, bx, by) {
   return result;
 }
 
+function mulberry32(seed) {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function blockSeed(bx, by) {
+  return (Math.imul(bx + 1, 374761393) ^ Math.imul(by + 1, 668265263)) >>> 0;
+}
+
+function randInt(rng, min, max) {
+  return min + Math.floor(rng() * (max - min + 1));
+}
+
+function subdivideX(buildings, rng, x, y, w, d, depth) {
+  const canSplit = w >= BUILDING_MIN_W * 2 + BUILDING_GAP;
+  const preferLeaf =
+    depth > 0 &&
+    w <= BUILDING_MAX_W &&
+    rng() < 0.75 + depth * 0.15;
+
+  if (preferLeaf || !canSplit) {
+    if (w >= BUILDING_MIN_W && d >= BUILDING_MIN_D) {
+      buildings.push({ x, y, w, d });
+    }
+    return;
+  }
+
+  const cut = randInt(
+    rng,
+    BUILDING_MIN_W,
+    w - BUILDING_MIN_W - BUILDING_GAP
+  );
+  subdivideX(buildings, rng, x, y, cut, d, depth + 1);
+  subdivideX(
+    buildings,
+    rng,
+    x + cut + BUILDING_GAP,
+    y,
+    w - cut - BUILDING_GAP,
+    d,
+    depth + 1
+  );
+}
+
+function generateBuildings(bx, by) {
+  const rng = mulberry32(blockSeed(bx, by));
+  const buildings = [];
+  const lotW = LOT_X1 - LOT_X0;
+  const lotH = LOT_Y1 - LOT_Y0;
+  const bands = [];
+
+  if (lotH >= BUILDING_MIN_D * 2 + BUILDING_GAP && rng() < 0.65) {
+    const cut = randInt(
+      rng,
+      BUILDING_MIN_D,
+      lotH - BUILDING_MIN_D - BUILDING_GAP
+    );
+    bands.push({ x: LOT_X0, y: LOT_Y0, w: lotW, d: cut });
+    bands.push({
+      x: LOT_X0,
+      y: LOT_Y0 + cut + BUILDING_GAP,
+      w: lotW,
+      d: lotH - cut - BUILDING_GAP,
+    });
+  } else {
+    bands.push({ x: LOT_X0, y: LOT_Y0, w: lotW, d: lotH });
+  }
+
+  for (let i = 0; i < bands.length; i++) {
+    const band = bands[i];
+    subdivideX(buildings, rng, band.x, band.y, band.w, band.d, 0);
+  }
+  return buildings;
+}
+
+export function buildingsForBlock(bx, by) {
+  const key = by * BLOCKS_X + bx;
+  let buildings = buildingsCache.get(key);
+  if (!buildings) {
+    buildings = generateBuildings(bx, by);
+    buildingsCache.set(key, buildings);
+  }
+  return buildings;
+}
+
+function hitBuilding(b, lx, ly) {
+  return lx >= b.x && lx < b.x + b.w && ly >= b.y && ly < b.y + b.d;
+}
+
+function buildingCharAt(bx, by, lx, ly) {
+  const buildings = buildingsForBlock(bx, by);
+  for (let i = 0; i < buildings.length; i++) {
+    if (hitBuilding(buildings[i], lx, ly)) return MAT_SKYSCRAPER.char;
+  }
+  return null;
+}
+
 export function cellChar(x, y) {
   const block = blockLocalAt(x, y);
   if (!block) return " ";
@@ -127,6 +240,9 @@ export function cellChar(x, y) {
     if (isStreetlamp(block.lx, block.ly, x, y)) return MAT_STREETLAMP.char;
     return MAT_SIDEWALK.char;
   }
+
+  const building = buildingCharAt(block.bx, block.by, block.lx, block.ly);
+  if (building) return building;
   return " ";
 }
 
