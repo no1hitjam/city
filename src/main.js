@@ -131,10 +131,9 @@ canvas.addEventListener("pointerdown", (event) => {
 canvas.addEventListener("pointermove", (event) => {
   if (drag && drag.pointerId === event.pointerId) {
     const point = clientToBuffer(event.clientX, event.clientY);
-    const cellW = Math.max(1, renderer.cellW);
-    const cellH = Math.max(1, renderer.cellH);
-    camX -= (point.x - drag.x) / cellW;
-    camY -= (point.y - drag.y) / cellH;
+    const cellSize = Math.max(1, renderer.cellSize);
+    camX -= (point.x - drag.x) / cellSize;
+    camY -= (point.y - drag.y) / cellSize;
     drag.x = point.x;
     drag.y = point.y;
     render();

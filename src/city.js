@@ -1,3 +1,5 @@
+import { MAT_SIDEWALK } from "./materials.js";
+
 export const BLOCKS_X = 100;
 export const BLOCKS_Y = 100;
 export const BLOCK_W = 72;
@@ -78,12 +80,6 @@ function blockLocalAt(x, y) {
   return { bx, by, lx, ly };
 }
 
-function perimeterChar(onWest, onEast, onNorth, onSouth) {
-  if ((onWest || onEast) && (onNorth || onSouth)) return "+";
-  if (onNorth || onSouth) return "-";
-  return "|";
-}
-
 function outerEdgeAt(lx, ly) {
   const onWest = lx === 0;
   const onEast = lx === OUTER_W - 1;
@@ -93,18 +89,7 @@ function outerEdgeAt(lx, ly) {
   return { onWest, onEast, onNorth, onSouth };
 }
 
-function innerEdgeAt(lx, ly) {
-  if (INNER_MAX_X <= INNER_MIN || INNER_MAX_Y <= INNER_MIN) return null;
-  const onWest = lx === INNER_MIN;
-  const onEast = lx === INNER_MAX_X;
-  const onNorth = ly === INNER_MIN;
-  const onSouth = ly === INNER_MAX_Y;
-  if (!onWest && !onEast && !onNorth && !onSouth) return null;
-  return { onWest, onEast, onNorth, onSouth };
-}
-
-function inSidewalkBand(lx, ly) {
-  if (lx <= 0 || ly <= 0 || lx >= OUTER_W - 1 || ly >= OUTER_H - 1) return false;
+function inSidewalk(lx, ly) {
   const inLot =
     lx > INNER_MIN &&
     lx < INNER_MAX_X &&
@@ -117,13 +102,7 @@ export function cellChar(x, y) {
   const block = blockLocalAt(x, y);
   if (!block) return " ";
 
-  const outer = outerEdgeAt(block.lx, block.ly);
-  if (outer) return perimeterChar(outer.onWest, outer.onEast, outer.onNorth, outer.onSouth);
-
-  const inner = innerEdgeAt(block.lx, block.ly);
-  if (inner) return perimeterChar(inner.onWest, inner.onEast, inner.onNorth, inner.onSouth);
-
-  if (inSidewalkBand(block.lx, block.ly)) return ".";
+  if (inSidewalk(block.lx, block.ly)) return MAT_SIDEWALK.char;
   return " ";
 }
 

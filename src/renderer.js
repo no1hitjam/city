@@ -1,10 +1,24 @@
+import { MATERIALS } from "./materials.js";
+
 const ATLAS_COLS = 16;
 const ATLAS_ROWS = 8;
-const CELL_W = 12;
-const CELL_H = 22;
+const CELL_SIZE = 14;
 
 const BG = [0x0c / 255, 0x12 / 255, 0x0e / 255];
 const FG = [0xc6 / 255, 0xf6 / 255, 0xa8 / 255];
+
+const CUSTOM_CHARS = new Set(
+  MATERIALS.filter((mat) => mat.fill).map((mat) => mat.char)
+);
+
+function materialColorLines() {
+  return MATERIALS.filter((mat) => mat.color)
+    .map(
+      (mat) =>
+        `  if (code == ${mat.char.charCodeAt(0)}u) fg = vec3(${mat.color.join(", ")});`
+    )
+    .join("\n");
+}
 
 const VERT_SRC = `#version 300 es
 out vec2 vUv;
@@ -47,7 +61,9 @@ void main() {
   );
 
   float coverage = texture(uAtlas, atlasUv).a;
-  oColor = vec4(mix(uBg, uFg, coverage), 1.0);
+  vec3 fg = uFg;
+${materialColorLines()}
+  oColor = vec4(mix(uBg, fg, coverage), 1.0);
 }
 `;
 
@@ -76,9 +92,9 @@ function link(gl, vert, frag) {
   return program;
 }
 
-function fitFont(ctx, cellW, cellH) {
+function fitFont(ctx, cellSize) {
   const family = 'Consolas, "Courier New", monospace';
-  let size = cellH;
+  let size = cellSize;
   while (size > 4) {
     ctx.font = `${size}px ${family}`;
     const metrics = ctx.measureText("M");
@@ -86,7 +102,7 @@ function fitFont(ctx, cellW, cellH) {
     const height =
       (metrics.actualBoundingBoxAscent || size * 0.8) +
       (metrics.actualBoundingBoxDescent || size * 0.2);
-    if (width <= cellW - 1 && height <= cellH - 1) {
+    if (width <= cellSize - 1 && height <= cellSize - 1) {
       return size;
     }
     size--;
@@ -108,8 +124,7 @@ export class AsciiRenderer {
       throw new Error("WebGL2 is not available");
     }
     this.gl = gl;
-    this.cellW = 0;
-    this.cellH = 0;
+    this.cellSize = 0;
     this.viewW = 1;
     this.viewH = 1;
     this.originX = 0;
@@ -169,48 +184,39 @@ export class AsciiRenderer {
 
   rebuildAtlas() {
     const gl = this.gl;
-    const cellW = this.cellW;
-    const cellH = this.cellH;
+    const cellSize = this.cellSize;
     const atlas = document.createElement("canvas");
-    atlas.width = ATLAS_COLS * cellW;
-    atlas.height = ATLAS_ROWS * cellH;
+    atlas.width = ATLAS_COLS * cellSize;
+    atlas.height = ATLAS_ROWS * cellSize;
     const ctx = atlas.getContext("2d");
     ctx.clearRect(0, 0, atlas.width, atlas.height);
-    fitFont(ctx, cellW, cellH);
+    fitFont(ctx, cellSize);
     ctx.fillStyle = "#fff";
     ctx.textAlign = "left";
     ctx.textBaseline = "alphabetic";
 
     for (let code = 33; code < 127; code++) {
       const ch = String.fromCharCode(code);
-      if (ch === "-" || ch === "|" || ch === "+") continue;
+      if (CUSTOM_CHARS.has(ch)) continue;
       const col = code % ATLAS_COLS;
       const row = Math.floor(code / ATLAS_COLS);
       const metrics = ctx.measureText(ch);
       const glyphW = metrics.width;
       const ascent = metrics.actualBoundingBoxAscent || 0;
       const descent = metrics.actualBoundingBoxDescent || 0;
-      const x = col * cellW + (cellW - glyphW) / 2;
-      const y = row * cellH + (cellH + ascent - descent) / 2;
+      const x = col * cellSize + (cellSize - glyphW) / 2;
+      const y = row * cellSize + (cellSize + ascent - descent) / 2;
       ctx.fillText(ch, x, y);
     }
 
-    const thickness = Math.max(1, Math.round(Math.min(cellW, cellH) * 0.16));
-    const midX = Math.floor((cellW - thickness) / 2);
-    const midY = Math.floor((cellH - thickness) / 2);
-    const roads = [
-      ["-", (x, y) => ctx.fillRect(x, y + midY, cellW, thickness)],
-      ["|", (x, y) => ctx.fillRect(x + midX, y, thickness, cellH)],
-      ["+", (x, y) => {
-        ctx.fillRect(x, y + midY, cellW, thickness);
-        ctx.fillRect(x + midX, y, thickness, cellH);
-      }],
-    ];
-    for (const [ch, draw] of roads) {
+    const customGlyphs = MATERIALS.filter((mat) => mat.fill === "block").map(
+      (mat) => [mat.char, (x, y) => ctx.fillRect(x, y, cellSize, cellSize)]
+    );
+    for (const [ch, draw] of customGlyphs) {
       const code = ch.charCodeAt(0);
       const col = code % ATLAS_COLS;
       const row = Math.floor(code / ATLAS_COLS);
-      draw(col * cellW, row * cellH);
+      draw(col * cellSize, row * cellSize);
     }
 
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
@@ -232,21 +238,19 @@ export class AsciiRenderer {
       this.canvas.height = bufH;
     }
 
-    const cellW = Math.max(1, Math.round(CELL_W * dpr));
-    const cellH = Math.max(1, Math.round(CELL_H * dpr));
-    const cols = Math.max(1, Math.floor(bufW / cellW));
-    const rows = Math.max(1, Math.floor(bufH / cellH));
-    this.viewW = cols * cellW;
-    this.viewH = rows * cellH;
+    const cellSize = Math.max(1, Math.round(CELL_SIZE * dpr));
+    const cols = Math.max(1, Math.floor(bufW / cellSize));
+    const rows = Math.max(1, Math.floor(bufH / cellSize));
+    this.viewW = cols * cellSize;
+    this.viewH = rows * cellSize;
     this.originX = Math.floor((bufW - this.viewW) / 2);
     this.originY = Math.floor((bufH - this.viewH) / 2);
     this.gridCols = cols;
     this.gridRows = rows;
     this.dpr = dpr;
 
-    if (cellW !== this.cellW || cellH !== this.cellH) {
-      this.cellW = cellW;
-      this.cellH = cellH;
+    if (cellSize !== this.cellSize) {
+      this.cellSize = cellSize;
       this.rebuildAtlas();
     }
 
@@ -268,13 +272,12 @@ export class AsciiRenderer {
       localY < 0 ||
       localX >= this.viewW ||
       localY >= this.viewH ||
-      this.cellW <= 0 ||
-      this.cellH <= 0
+      this.cellSize <= 0
     ) {
       return null;
     }
-    const col = Math.floor(localX / this.cellW);
-    const row = Math.floor(localY / this.cellH);
+    const col = Math.floor(localX / this.cellSize);
+    const row = Math.floor(localY / this.cellSize);
     if (col < 0 || row < 0 || col >= this.gridCols || row >= this.gridRows) {
       return null;
     }
