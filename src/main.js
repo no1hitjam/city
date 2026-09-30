@@ -34,6 +34,7 @@ import {
   WET_SPECULAR,
 } from "./lighting.js";
 import { paintFleet, stampCarLights, stampSignalLights } from "./vehicles.js";
+import { paintCrowd } from "./people.js";
 
 const ROAD_COLOR = [0x08 / 255, 0x09 / 255, 0x0e / 255];
 const LAMP_POLE_COLOR = [0x2a / 255, 0x2c / 255, 0x32 / 255];
@@ -523,6 +524,17 @@ function paintVoxels() {
   }
 
   count = paintFleet(
+    timeSec,
+    data,
+    count,
+    maxCount,
+    x0,
+    z0,
+    x1,
+    z1,
+    pushBox
+  );
+  count = paintCrowd(
     timeSec,
     data,
     count,
