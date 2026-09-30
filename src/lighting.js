@@ -8,6 +8,13 @@ export const LAMP_INTENSITY = 0.95;
 export const AMBIENT_LIGHT = [0.08, 0.095, 0.09];
 /** Extra attenuation per voxel of height above ground. */
 export const HEIGHT_FALLOFF = 0.16;
+/** Nominal lamp height used for real + mirrored virtual lights. */
+export const LIGHT_HEIGHT = 3.6;
+/**
+ * Strength of the virtual light placed at -LIGHT_HEIGHT (wet reflections).
+ * Same tile irradiance, no extra CPU stamp — evaluated in the shader only.
+ */
+export const MIRROR_STRENGTH = 0.55;
 /** Cool blue lamp tint (matches streetlamp material). */
 export const LAMP_COLOR = MAT_STREETLAMP.color;
 

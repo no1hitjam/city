@@ -42,6 +42,8 @@ uniform vec2 uLightOrigin;
 uniform vec2 uLightSize;
 uniform float uLightScale;
 uniform float uHeightFalloff;
+uniform float uLightHeight;
+uniform float uMirrorStrength;
 uniform vec3 uCameraPos;
 uniform float uWetSpecular;
 
@@ -65,6 +67,12 @@ float heightAtten(float y) {
   return 1.0 / (1.0 + layer * uHeightFalloff);
 }
 
+// Distance falloff from a virtual point light at lightY (same XZ as the tile).
+float attenFromHeight(float fragY, float lightY) {
+  float layer = abs(fragY - lightY);
+  return 1.0 / (1.0 + layer * uHeightFalloff);
+}
+
 vec3 sampleTileLight(vec3 world) {
   return fetchTile(ivec2(floor(world.xz))) * heightAtten(world.y);
 }
@@ -73,14 +81,21 @@ float luma(vec3 c) {
   return dot(c, vec3(0.2126, 0.7152, 0.0722));
 }
 
-// Wet sheen from this tile's light only — no cross-tile blending.
+// Wet sheen: real tile light + mirrored twin at -uLightHeight (no extra stamp).
 vec3 wetReflection(vec3 world, vec3 N, vec3 V, float wet) {
   ivec2 tile = ivec2(floor(world.xz));
   vec3 Lc = fetchTile(tile);
   // Neighbor taps only estimate light direction, not color.
   float gx = luma(fetchTile(tile + ivec2(1, 0))) - luma(fetchTile(tile - ivec2(1, 0)));
   float gz = luma(fetchTile(tile + ivec2(0, 1))) - luma(fetchTile(tile - ivec2(0, 1)));
-  vec3 Ldir = normalize(vec3(-gx, 0.55, -gz) + vec3(1e-4));
+
+  // Real lamp above + virtual image below the ground plane.
+  float realW = attenFromHeight(world.y, uLightHeight);
+  float mirrorW = attenFromHeight(world.y, -uLightHeight) * uMirrorStrength;
+  vec3 glow = max(Lc * (realW + mirrorW) - vec3(0.09), vec3(0.0));
+
+  // Specular from the mirrored light (pulls highlight toward the reflection).
+  vec3 Ldir = normalize(vec3(-gx, -0.65, -gz) * mirrorW + vec3(-gx, 0.55, -gz) * realW + vec3(1e-4));
 
   float ndv = max(dot(N, V), 0.0);
   float fresnel = mix(0.18, 0.8, pow(1.0 - ndv, 2.6));
@@ -88,8 +103,6 @@ vec3 wetReflection(vec3 world, vec3 N, vec3 V, float wet) {
   vec3 H = normalize(Ldir + V);
   float spec = pow(max(dot(N, H), 0.0), 56.0);
   float softSpec = pow(max(dot(N, H), 0.0), 14.0);
-
-  vec3 glow = max(Lc - vec3(0.09), vec3(0.0));
 
   return wet * uWetSpecular * fresnel * (
     glow * (spec * 0.75 + softSpec * 0.15) +
@@ -100,12 +113,22 @@ vec3 wetReflection(vec3 world, vec3 N, vec3 V, float wet) {
 void main() {
   vec3 N = normalize(vNormal);
   vec3 V = normalize(uCameraPos - vWorld);
-  float wet = vGloss * step(0.55, N.y);
+  float topFace = step(0.55, N.y);
+  float sideFace = 1.0 - step(0.55, abs(N.y));
+  float wet = vGloss * topFace;
+  float glass = vGloss * sideFace;
 
+  vec3 tileLight = sampleTileLight(vWorld);
   vec3 albedo = mix(vAlbedo, vAlbedo * 0.62, wet * 0.6);
   float shade = mix(vShade, mix(vShade, 1.0, 0.08), wet);
-  vec3 lit = albedo * sampleTileLight(vWorld) * mix(1.0, 0.88, wet) * shade;
+  vec3 lit = albedo * tileLight * mix(1.0, 0.88, wet) * shade;
   lit += wetReflection(vWorld, N, V, wet);
+
+  // Black glass on facades: dark base + view-dependent fresnel sheen.
+  float ndv = max(dot(N, V), 0.0);
+  float glassFresnel = mix(0.06, 0.72, pow(1.0 - ndv, 2.8));
+  vec3 glassLit = vAlbedo * tileLight * shade * 0.45 + tileLight * glassFresnel * 0.85;
+  lit = mix(lit, glassLit, glass);
 
   oColor = vec4(mix(lit, vAlbedo * 1.35, vEmissive), 1.0);
 }
@@ -333,6 +356,8 @@ export class VoxelRenderer {
     this.lightSize = new Float32Array([1, 1]);
     this.lightScale = 2.5;
     this.heightFalloff = 0.11;
+    this.lightHeight = 3.6;
+    this.mirrorStrength = 0.55;
     this.cameraPos = new Float32Array([0, 20, 0]);
     this.wetSpecular = 0.35;
 
@@ -349,6 +374,8 @@ export class VoxelRenderer {
     this.locLightSize = gl.getUniformLocation(this.program, "uLightSize");
     this.locLightScale = gl.getUniformLocation(this.program, "uLightScale");
     this.locHeightFalloff = gl.getUniformLocation(this.program, "uHeightFalloff");
+    this.locLightHeight = gl.getUniformLocation(this.program, "uLightHeight");
+    this.locMirrorStrength = gl.getUniformLocation(this.program, "uMirrorStrength");
     this.locCameraPos = gl.getUniformLocation(this.program, "uCameraPos");
     this.locWetSpecular = gl.getUniformLocation(this.program, "uWetSpecular");
 
@@ -480,8 +507,10 @@ export class VoxelRenderer {
    * @param {number} decodeScale
    * @param {number} heightFalloff
    * @param {number} [wetSpecular]
+   * @param {number} [lightHeight]
+   * @param {number} [mirrorStrength]
    */
-  uploadLightmap(map, decodeScale, heightFalloff, wetSpecular) {
+  uploadLightmap(map, decodeScale, heightFalloff, wetSpecular, lightHeight, mirrorStrength) {
     const gl = this.gl;
     this.lightOrigin[0] = map.originX;
     this.lightOrigin[1] = map.originZ;
@@ -490,6 +519,8 @@ export class VoxelRenderer {
     this.lightScale = decodeScale;
     this.heightFalloff = heightFalloff;
     if (wetSpecular != null) this.wetSpecular = wetSpecular;
+    if (lightHeight != null) this.lightHeight = lightHeight;
+    if (mirrorStrength != null) this.mirrorStrength = mirrorStrength;
     gl.bindTexture(gl.TEXTURE_2D, this.lightTex);
     gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
     gl.texImage2D(
@@ -542,6 +573,8 @@ export class VoxelRenderer {
     gl.uniform2fv(this.locLightSize, this.lightSize);
     gl.uniform1f(this.locLightScale, this.lightScale);
     gl.uniform1f(this.locHeightFalloff, this.heightFalloff);
+    gl.uniform1f(this.locLightHeight, this.lightHeight);
+    gl.uniform1f(this.locMirrorStrength, this.mirrorStrength);
     gl.uniform3fv(this.locCameraPos, this.cameraPos);
     gl.uniform1f(this.locWetSpecular, this.wetSpecular);
     gl.activeTexture(gl.TEXTURE0);

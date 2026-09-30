@@ -14,12 +14,19 @@ import {
   roadAt,
   roadLabel,
 } from "./city.js";
-import { MAT_ROOF, MAT_SKYSCRAPER, MAT_STREETLAMP } from "./materials.js";
+import {
+  MAT_ROOF,
+  MAT_SKYSCRAPER,
+  MAT_STREETLAMP,
+  MAT_WINDOW,
+} from "./materials.js";
 import {
   TileLightmap,
   LAMP_RADIUS,
   LIGHT_TEX_SCALE,
   HEIGHT_FALLOFF,
+  LIGHT_HEIGHT,
+  MIRROR_STRENGTH,
   WET_SPECULAR,
 } from "./lighting.js";
 import { paintFleet, stampCarLights, stampSignalLights } from "./vehicles.js";
@@ -32,6 +39,14 @@ const MAX_ZOOM = 80;
 const FLOATS_PER = 11;
 const LAMP_GRID = 16;
 const LAMP_POLE_H = 3.4;
+/** Window pane size along the facade / height. */
+const WINDOW_SPAN = 0.52;
+/** How deep the pane sits into the wall. */
+const WINDOW_INSET = 0.08;
+/** Center-to-center spacing along the facade. */
+const WINDOW_PITCH = 1.2;
+/** Keep panes clear of building corners. */
+const WINDOW_MARGIN = 0.85;
 
 const canvas = document.querySelector("#view");
 const infoValue = document.querySelector("#info-value");
@@ -66,6 +81,106 @@ function pushBox(data, count, ox, oy, oz, sx, sy, sz, color, emissive = 0, gloss
   data[i + 9] = emissive;
   data[i + 10] = gloss;
   return count + 1;
+}
+
+/** Evenly spaced centers from [start, end] with preferred pitch. */
+function gridCenters(start, end, pitch) {
+  const span = end - start;
+  if (span <= 0) return [];
+  const n = Math.max(1, Math.round(span / pitch));
+  const step = span / n;
+  const centers = [];
+  for (let i = 0; i < n; i++) centers.push(start + (i + 0.5) * step);
+  return centers;
+}
+
+/**
+ * Glossy black window panes inset into the four vertical faces.
+ * One row per occupied floor (excluding roof); columns along each facade.
+ */
+function paintBuildingWindows(data, count, maxCount, ox, oz, b) {
+  if (b.h < 2 || b.w < 3 || b.d < 3) return count;
+
+  const halfW = b.w * 0.5;
+  const halfD = b.d * 0.5;
+  const x0 = ox - halfW + WINDOW_MARGIN;
+  const x1 = ox + halfW - WINDOW_MARGIN;
+  const z0 = oz - halfD + WINDOW_MARGIN;
+  const z1 = oz + halfD - WINDOW_MARGIN;
+  const xs = gridCenters(x0, x1, WINDOW_PITCH);
+  const zs = gridCenters(z0, z1, WINDOW_PITCH);
+  if (xs.length === 0 && zs.length === 0) return count;
+
+  const color = MAT_WINDOW.color;
+  const depth = WINDOW_INSET;
+  // Mostly buried in the wall; a hair of the pane sticks out so it's visible.
+  const faceN = oz + halfD - depth * 0.5 + 0.015;
+  const faceS = oz - halfD + depth * 0.5 - 0.015;
+  const faceE = ox + halfW - depth * 0.5 + 0.015;
+  const faceW = ox - halfW + depth * 0.5 - 0.015;
+
+  for (let layer = 0; layer < b.h - 1 && count < maxCount; layer++) {
+    const cy = layer + 0.5;
+    for (let i = 0; i < xs.length && count < maxCount; i++) {
+      count = pushBox(
+        data,
+        count,
+        xs[i],
+        cy,
+        faceN,
+        WINDOW_SPAN,
+        WINDOW_SPAN,
+        depth,
+        color,
+        0,
+        1
+      );
+      if (count >= maxCount) return count;
+      count = pushBox(
+        data,
+        count,
+        xs[i],
+        cy,
+        faceS,
+        WINDOW_SPAN,
+        WINDOW_SPAN,
+        depth,
+        color,
+        0,
+        1
+      );
+    }
+    for (let i = 0; i < zs.length && count < maxCount; i++) {
+      count = pushBox(
+        data,
+        count,
+        faceE,
+        cy,
+        zs[i],
+        depth,
+        WINDOW_SPAN,
+        WINDOW_SPAN,
+        color,
+        0,
+        1
+      );
+      if (count >= maxCount) return count;
+      count = pushBox(
+        data,
+        count,
+        faceW,
+        cy,
+        zs[i],
+        depth,
+        WINDOW_SPAN,
+        WINDOW_SPAN,
+        color,
+        0,
+        1
+      );
+    }
+  }
+  return count;
 }
 
 /** Dark pole + lantern housing with a bright emissive bulb. */
@@ -156,7 +271,14 @@ function rebuildLightmap(x0, z0, x1, z1) {
   stampSignalLights(lightmap, timeSec);
 
   lightmap.toTextureBytes();
-  renderer.uploadLightmap(lightmap, LIGHT_TEX_SCALE, HEIGHT_FALLOFF, WET_SPECULAR);
+  renderer.uploadLightmap(
+    lightmap,
+    LIGHT_TEX_SCALE,
+    HEIGHT_FALLOFF,
+    WET_SPECULAR,
+    LIGHT_HEIGHT,
+    MIRROR_STRENGTH
+  );
 }
 
 function paintVoxels() {
@@ -227,6 +349,9 @@ function paintVoxels() {
             b.d,
             [base[0] * shade, base[1] * shade, base[2] * shade]
           );
+        }
+        if (count < maxCount) {
+          count = paintBuildingWindows(data, count, maxCount, ox, oz, b);
         }
       }
     }
