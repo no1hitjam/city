@@ -17,6 +17,8 @@ const MAX_CARS = 300;
 const VIEW_PAD = 24;
 const STOP_MARGIN = 2.0;
 const MIN_GAP = 3.2;
+/** Approach distance (in seconds of cruise) to start easing for a red light / lead car. */
+const BRAKE_TIME = 2.2;
 const MAX_DT = 0.05;
 
 /** Seconds per full avenue→street cycle at an intersection. */
@@ -569,6 +571,14 @@ function compactCars() {
   cars.length = w;
 }
 
+/** Cruise-proportional ease so speed hits ~0 as remaining distance hits 0. */
+function easeToStop(target, dist, cruise) {
+  if (dist <= 0) return 0;
+  const brakeDist = cruise * BRAKE_TIME;
+  if (dist >= brakeDist) return target;
+  return Math.min(target, cruise * (dist / brakeDist));
+}
+
 function updateCars(dt, timeSec) {
   /** @type {Map<string, Car[]>} */
   const groups = new Map();
@@ -591,6 +601,8 @@ function updateCars(dt, timeSec) {
       const car = list[i];
       const spec = LANES[car.lane];
       let target = spec.speed;
+      /** @type {number | null} */
+      let holdAt = null;
 
       const cross = nextCrossing(car);
       if (cross) {
@@ -604,16 +616,12 @@ function updateCars(dt, timeSec) {
         const mayEnter = axisMayEnter(timeSec, cross.ave, cross.street, car.alongX);
 
         if (!mayEnter) {
-          if (inBox) {
-            // Caught inside on a phase change — finish clearing.
+          if (inBox || distToStop < 0) {
+            // Past the stop line (or in the box) on a phase change — finish clearing.
             target = spec.speed;
-          } else if (distToStop > 0.08) {
-            if (distToStop < spec.speed * 2.8) {
-              target = Math.min(target, Math.max(0, distToStop * 2.5));
-            }
           } else {
-            car.along = cross.stop;
-            target = 0;
+            target = easeToStop(target, distToStop, spec.speed);
+            holdAt = cross.stop;
           }
         }
       }
@@ -621,17 +629,25 @@ function updateCars(dt, timeSec) {
       if (i + 1 < list.length) {
         const lead = list[i + 1];
         const gap = (lead.along - car.along) * dir;
-        if (gap < MIN_GAP + spec.speed * 0.35) {
-          target = Math.min(target, Math.max(0, lead.speed - 1, (gap - MIN_GAP) * 4));
-        }
-        if (gap < MIN_GAP * 0.85) {
-          target = 0;
-          car.along = lead.along - dir * MIN_GAP * 0.85;
+        const followDist = Math.max(0, gap - MIN_GAP);
+        target = Math.min(
+          target,
+          easeToStop(target, followDist, spec.speed)
+        );
+        const followHold = lead.along - dir * MIN_GAP;
+        if (holdAt == null || (followHold - holdAt) * dir < 0) {
+          holdAt = followHold;
         }
       }
 
       car.speed = target;
       car.along += car.speed * dir * dt;
+
+      // Clamp forward progress only — never yank backward (that reads as a teleport).
+      if (holdAt != null && (car.along - holdAt) * dir > 0) {
+        car.along = holdAt;
+        car.speed = 0;
+      }
     }
   }
 }
