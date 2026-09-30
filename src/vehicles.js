@@ -38,7 +38,6 @@ const CAR_COLORS = [
   [0x8c / 255, 0x8c / 255, 0x90 / 255],
 ];
 
-const CABIN_SHADE = 0.72;
 const POLE_COLOR = [0x2a / 255, 0x2c / 255, 0x32 / 255];
 const HOUSING_COLOR = [0x14 / 255, 0x14 / 255, 0x18 / 255];
 const LAMP_RED = [1.0, 0.18, 0.12];
@@ -199,40 +198,29 @@ function nextCrossing(car) {
   };
 }
 
+/** One wedge body (shader-tapered); shape 1/+X 2/-X 3/+Z 4/-Z = nose direction. */
 function pushCar(data, count, maxCount, x, z, alongX, dir, color, pushBox) {
-  const bodyL = 2.1;
-  const bodyW = 1.1;
-  const bodyH = 0.6;
+  const bodyL = 2.4;
+  const bodyW = 1.05;
+  const bodyH = 0.7;
+  const ground = 0.04;
   const sx = alongX ? bodyL : bodyW;
   const sz = alongX ? bodyW : bodyL;
-  const bodyY = bodyH * 0.5 + 0.04;
+  const shape = alongX ? (dir > 0 ? 1 : 2) : dir > 0 ? 3 : 4;
 
-  count = pushBox(data, count, x, bodyY, z, sx, bodyH, sz, color);
-  if (count >= maxCount) return count;
-
-  const cabinL = 1.0;
-  const cabinW = 0.9;
-  const cabinH = 0.45;
-  const csx = alongX ? cabinL : cabinW;
-  const csz = alongX ? cabinW : cabinL;
-  const rear = 0.3 * dir;
-  const cx = alongX ? x - rear : x;
-  const cz = alongX ? z : z - rear;
-  const cabin = [
-    color[0] * CABIN_SHADE,
-    color[1] * CABIN_SHADE,
-    color[2] * CABIN_SHADE,
-  ];
   count = pushBox(
     data,
     count,
-    cx,
-    bodyH + cabinH * 0.5 + 0.04,
-    cz,
-    csx,
-    cabinH,
-    csz,
-    cabin
+    x,
+    ground + bodyH * 0.5,
+    z,
+    sx,
+    bodyH,
+    sz,
+    color,
+    0,
+    0,
+    shape
   );
   if (count >= maxCount) return count;
 
@@ -242,7 +230,8 @@ function pushCar(data, count, maxCount, x, z, alongX, dir, color, pushBox) {
   const front = (bodyL * 0.5 + hlDepth * 0.5) * dir;
   const back = -(bodyL * 0.5 + hlDepth * 0.5) * dir;
   const side = bodyW * 0.28;
-  const hy = bodyY * 0.55;
+  const hy = ground + bodyH * 0.28 * 0.55;
+  const ty = ground + bodyH * 0.55;
   if (alongX) {
     count = pushBox(
       data, count, x + front, hy, z - side, hlDepth, hlSize, hlSize, HEADLIGHT_COLOR, 1
@@ -253,11 +242,11 @@ function pushCar(data, count, maxCount, x, z, alongX, dir, color, pushBox) {
     );
     if (count >= maxCount) return count;
     count = pushBox(
-      data, count, x + back, hy, z - side, hlDepth, hlSize, hlSize, TAILLIGHT_COLOR, 1
+      data, count, x + back, ty, z - side, hlDepth, hlSize, hlSize, TAILLIGHT_COLOR, 1
     );
     if (count >= maxCount) return count;
     return pushBox(
-      data, count, x + back, hy, z + side, hlDepth, hlSize, hlSize, TAILLIGHT_COLOR, 1
+      data, count, x + back, ty, z + side, hlDepth, hlSize, hlSize, TAILLIGHT_COLOR, 1
     );
   }
   count = pushBox(
@@ -269,11 +258,11 @@ function pushCar(data, count, maxCount, x, z, alongX, dir, color, pushBox) {
   );
   if (count >= maxCount) return count;
   count = pushBox(
-    data, count, x - side, hy, z + back, hlSize, hlSize, hlDepth, TAILLIGHT_COLOR, 1
+    data, count, x - side, ty, z + back, hlSize, hlSize, hlDepth, TAILLIGHT_COLOR, 1
   );
   if (count >= maxCount) return count;
   return pushBox(
-    data, count, x + side, hy, z + back, hlSize, hlSize, hlDepth, TAILLIGHT_COLOR, 1
+    data, count, x + side, ty, z + back, hlSize, hlSize, hlDepth, TAILLIGHT_COLOR, 1
   );
 }
 

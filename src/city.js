@@ -23,7 +23,7 @@ const BUILDING_MIN_W = 8;
 const BUILDING_MIN_D = 5;
 const BUILDING_MAX_W = 40;
 const BUILDING_MIN_H = 2;
-const BUILDING_MAX_H = 28;
+export const BUILDING_MAX_H = 28;
 export const STRIDE_X = OUTER_W + ROAD_W;
 export const STRIDE_Y = OUTER_H + ROAD_H;
 
@@ -130,6 +130,21 @@ export function isStreetlampAt(x, y) {
   const block = blockLocalAt(x, y);
   if (!block) return false;
   return isStreetlamp(block.lx, block.ly, x, y);
+}
+
+/**
+ * Unit XZ direction from a streetlamp into the adjacent road, or null.
+ * @returns {{ nx: number, nz: number } | null}
+ */
+export function streetlampOutward(x, y) {
+  const block = blockLocalAt(x, y);
+  if (!block || !isStreetlamp(block.lx, block.ly, x, y)) return null;
+  const { lx, ly } = block;
+  if (ly === 0) return { nx: 0, nz: -1 };
+  if (ly === OUTER_H - 1) return { nx: 0, nz: 1 };
+  if (lx === 0) return { nx: -1, nz: 0 };
+  if (lx === OUTER_W - 1) return { nx: 1, nz: 0 };
+  return null;
 }
 
 function sidewalkRoadAt(lx, ly, bx, by) {

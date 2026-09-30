@@ -7,7 +7,7 @@ export const LAMP_INTENSITY = 0.95;
 /** Soft night fill so unlit tiles stay readable. */
 export const AMBIENT_LIGHT = [0.08, 0.095, 0.09];
 /** Extra attenuation per voxel of height above ground. */
-export const HEIGHT_FALLOFF = 0.16;
+export const HEIGHT_FALLOFF = 0.08;
 /** Nominal lamp height used for real + mirrored virtual lights. */
 export const LIGHT_HEIGHT = 3.6;
 /**
@@ -68,6 +68,24 @@ export class TileLightmap {
       this.rgb[i + 1] = ag;
       this.rgb[i + 2] = ab;
     }
+  }
+
+  /** Add irradiance to the single tile containing (lx, lz). */
+  stampTile(lx, lz, color, intensity) {
+    const x = Math.floor(lx);
+    const z = Math.floor(lz);
+    if (
+      x < this.originX ||
+      z < this.originZ ||
+      x >= this.originX + this.w ||
+      z >= this.originZ + this.h
+    ) {
+      return;
+    }
+    const i = ((z - this.originZ) * this.w + (x - this.originX)) * 3;
+    this.rgb[i] += color[0] * intensity;
+    this.rgb[i + 1] += color[1] * intensity;
+    this.rgb[i + 2] += color[2] * intensity;
   }
 
   /**

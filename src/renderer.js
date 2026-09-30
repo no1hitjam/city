@@ -8,6 +8,7 @@ layout(location = 3) in vec3 aScale;
 layout(location = 4) in vec3 aColor;
 layout(location = 5) in float aEmissive;
 layout(location = 6) in float aGloss;
+layout(location = 7) in float aShape;
 
 uniform mat4 uVP;
 uniform vec3 uLightDir;
@@ -19,10 +20,31 @@ out float vShade;
 out float vEmissive;
 out float vGloss;
 
+// aShape: 0 box, 1/+X 2/-X 3/+Z 4/-Z wedge (low toward nose).
 void main() {
-  vec3 world = aPos * aScale + aOffset;
+  vec3 pos = aPos;
+  vec3 nrm = aNormal;
+  if (aShape > 0.5) {
+    float along = pos.x;
+    vec3 slopeN = vec3(0.78, 1.0, 0.0);
+    if (aShape > 1.5 && aShape < 2.5) {
+      along = -pos.x;
+      slopeN = vec3(-0.78, 1.0, 0.0);
+    } else if (aShape > 2.5 && aShape < 3.5) {
+      along = pos.z;
+      slopeN = vec3(0.0, 1.0, 0.78);
+    } else if (aShape > 3.5) {
+      along = -pos.z;
+      slopeN = vec3(0.0, 1.0, -0.78);
+    }
+    // Full height at tail, ~28% at nose; bottom stays planted.
+    float hFactor = mix(1.0, 0.28, along + 0.5);
+    pos.y = (aPos.y + 0.5) * hFactor - 0.5;
+    if (aNormal.y > 0.5) nrm = normalize(slopeN);
+  }
+  vec3 world = pos * aScale + aOffset;
   gl_Position = uVP * vec4(world, 1.0);
-  vec3 nrm = normalize(aNormal);
+  nrm = normalize(nrm);
   float ndl = max(dot(nrm, normalize(uLightDir)), 0.0);
   vWorld = world;
   vNormal = nrm;
@@ -326,7 +348,7 @@ function buildCubeMesh() {
   };
 }
 
-const FLOATS_PER_INSTANCE = 11;
+const FLOATS_PER_INSTANCE = 12;
 
 export class VoxelRenderer {
   constructor(canvas) {
@@ -420,6 +442,9 @@ export class VoxelRenderer {
     gl.enableVertexAttribArray(6);
     gl.vertexAttribPointer(6, 1, gl.FLOAT, false, stride, 40);
     gl.vertexAttribDivisor(6, 1);
+    gl.enableVertexAttribArray(7);
+    gl.vertexAttribPointer(7, 1, gl.FLOAT, false, stride, 44);
+    gl.vertexAttribDivisor(7, 1);
 
     this.lightTex = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, this.lightTex);
