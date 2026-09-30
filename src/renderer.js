@@ -1,3 +1,5 @@
+import { RainPass } from "./rain.js";
+
 const BG = [0x0c / 255, 0x12 / 255, 0x0e / 255];
 
 const VERT_SRC = `#version 300 es
@@ -471,6 +473,9 @@ export class VoxelRenderer {
 
     gl.useProgram(this.program);
     gl.uniform1i(this.locLightmap, 0);
+
+    this.rain = new RainPass(gl);
+    this.timeSec = 0;
   }
 
   resize() {
@@ -582,36 +587,53 @@ export class VoxelRenderer {
     mat4Invert(this.invVp, this.vp);
   }
 
-  draw() {
+  draw(timeSec = 0) {
     const gl = this.gl;
+    this.timeSec = timeSec;
     this.updateMatrices();
     gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
     gl.clearColor(BG[0], BG[1], BG[2], 1);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
-    if (this.instanceCount <= 0) return;
+    if (this.instanceCount > 0) {
+      gl.useProgram(this.program);
+      gl.uniformMatrix4fv(this.locVp, false, this.vp);
+      gl.uniform3fv(this.locLight, this.lightDir);
+      gl.uniform2fv(this.locLightOrigin, this.lightOrigin);
+      gl.uniform2fv(this.locLightSize, this.lightSize);
+      gl.uniform1f(this.locLightScale, this.lightScale);
+      gl.uniform1f(this.locHeightFalloff, this.heightFalloff);
+      gl.uniform1f(this.locLightHeight, this.lightHeight);
+      gl.uniform1f(this.locMirrorStrength, this.mirrorStrength);
+      gl.uniform3fv(this.locCameraPos, this.cameraPos);
+      gl.uniform1f(this.locWetSpecular, this.wetSpecular);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, this.lightTex);
+      gl.bindVertexArray(this.vao);
+      gl.drawElementsInstanced(
+        gl.TRIANGLES,
+        this.indexCount,
+        gl.UNSIGNED_SHORT,
+        0,
+        this.instanceCount
+      );
+      gl.bindVertexArray(null);
+    }
 
-    gl.useProgram(this.program);
-    gl.uniformMatrix4fv(this.locVp, false, this.vp);
-    gl.uniform3fv(this.locLight, this.lightDir);
-    gl.uniform2fv(this.locLightOrigin, this.lightOrigin);
-    gl.uniform2fv(this.locLightSize, this.lightSize);
-    gl.uniform1f(this.locLightScale, this.lightScale);
-    gl.uniform1f(this.locHeightFalloff, this.heightFalloff);
-    gl.uniform1f(this.locLightHeight, this.lightHeight);
-    gl.uniform1f(this.locMirrorStrength, this.mirrorStrength);
-    gl.uniform3fv(this.locCameraPos, this.cameraPos);
-    gl.uniform1f(this.locWetSpecular, this.wetSpecular);
-    gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, this.lightTex);
-    gl.bindVertexArray(this.vao);
-    gl.drawElementsInstanced(
-      gl.TRIANGLES,
-      this.indexCount,
-      gl.UNSIGNED_SHORT,
-      0,
-      this.instanceCount
-    );
+    this.rain.draw({
+      vp: this.vp,
+      view: this.tmpView,
+      timeSec: this.timeSec,
+      camX: this.camX,
+      camZ: this.camZ,
+      zoom: this.zoom,
+      aspect: this.aspect || 1,
+      lightTex: this.lightTex,
+      lightOrigin: this.lightOrigin,
+      lightSize: this.lightSize,
+      lightScale: this.lightScale,
+      heightFalloff: this.heightFalloff,
+    });
   }
 
   /**

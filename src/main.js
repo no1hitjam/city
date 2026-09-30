@@ -577,7 +577,7 @@ function render() {
   clampCamera();
   renderer.setCamera(camX, camZ, zoom);
   paintVoxels();
-  renderer.draw();
+  renderer.draw(timeSec);
 }
 
 function frame(nowMs) {
