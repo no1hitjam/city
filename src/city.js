@@ -9,7 +9,7 @@ export const ROAD_H = 3;
 
 const OUTER_W = BLOCK_W + 2;
 const OUTER_H = BLOCK_H + 2;
-const SIDEWALK_D = 2;
+const SIDEWALK_D = 1;
 const LAMP_INTERVAL = 16;
 const INNER_MIN = SIDEWALK_D + 1;
 const INNER_MAX_X = OUTER_W - SIDEWALK_D - 2;
