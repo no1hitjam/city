@@ -1,69 +1,32 @@
-import { MATERIALS } from "./materials.js";
-
-const ATLAS_COLS = 16;
-const ATLAS_ROWS = 8;
-const CELL_SIZE = 14;
-
 const BG = [0x0c / 255, 0x12 / 255, 0x0e / 255];
-const FG = [0xc6 / 255, 0xf6 / 255, 0xa8 / 255];
-
-const CUSTOM_CHARS = new Set(
-  MATERIALS.filter((mat) => mat.fill).map((mat) => mat.char)
-);
-
-function materialColorLines() {
-  return MATERIALS.filter((mat) => mat.color)
-    .map(
-      (mat) =>
-        `  if (code == ${mat.char.charCodeAt(0)}u) fg = vec3(${mat.color.join(", ")});`
-    )
-    .join("\n");
-}
 
 const VERT_SRC = `#version 300 es
-out vec2 vUv;
+layout(location = 0) in vec3 aPos;
+layout(location = 1) in vec3 aNormal;
+layout(location = 2) in vec3 aOffset;
+layout(location = 3) in vec3 aScale;
+layout(location = 4) in vec3 aColor;
+
+uniform mat4 uVP;
+uniform vec3 uLightDir;
+
+out vec3 vColor;
+
 void main() {
-  float x = float((gl_VertexID & 1) << 2) - 1.0;
-  float y = float((gl_VertexID & 2) << 1) - 1.0;
-  gl_Position = vec4(x, y, 0.0, 1.0);
-  vUv = vec2(x, y) * 0.5 + 0.5;
+  vec3 world = aPos * aScale + aOffset;
+  gl_Position = uVP * vec4(world, 1.0);
+  float ndl = max(dot(normalize(aNormal), normalize(uLightDir)), 0.0);
+  float shade = 0.35 + 0.65 * ndl;
+  vColor = aColor * shade;
 }
 `;
 
 const FRAG_SRC = `#version 300 es
 precision highp float;
-precision highp usampler2D;
-
-uniform usampler2D uChars;
-uniform sampler2D uAtlas;
-uniform vec2 uGridSize;
-uniform vec3 uFg;
-uniform vec3 uBg;
-
-in vec2 vUv;
+in vec3 vColor;
 out vec4 oColor;
-
-const vec2 ATLAS_GRID = vec2(16.0, 8.0);
-
 void main() {
-  vec2 gridUv = vec2(vUv.x, 1.0 - vUv.y) * uGridSize;
-  ivec2 cell = ivec2(floor(gridUv));
-  vec2 local = fract(gridUv);
-
-  uint code = texelFetch(uChars, cell, 0).r;
-  ivec2 atlasSize = textureSize(uAtlas, 0);
-  vec2 cellPx = vec2(atlasSize) / ATLAS_GRID;
-  vec2 glyph = vec2(float(code % 16u), float(code / 16u));
-  vec2 atlasPx = glyph * cellPx + local * cellPx;
-  vec2 atlasUv = vec2(
-    atlasPx.x / float(atlasSize.x),
-    1.0 - atlasPx.y / float(atlasSize.y)
-  );
-
-  float coverage = texture(uAtlas, atlasUv).a;
-  vec3 fg = uFg;
-${materialColorLines()}
-  oColor = vec4(mix(uBg, fg, coverage), 1.0);
+  oColor = vec4(vColor, 1.0);
 }
 `;
 
@@ -92,48 +55,199 @@ function link(gl, vert, frag) {
   return program;
 }
 
-function fitFont(ctx, cellSize) {
-  const family = 'Consolas, "Courier New", monospace';
-  let size = cellSize;
-  while (size > 4) {
-    ctx.font = `${size}px ${family}`;
-    const metrics = ctx.measureText("M");
-    const width = metrics.width;
-    const height =
-      (metrics.actualBoundingBoxAscent || size * 0.8) +
-      (metrics.actualBoundingBoxDescent || size * 0.2);
-    if (width <= cellSize - 1 && height <= cellSize - 1) {
-      return size;
-    }
-    size--;
-  }
-  ctx.font = `4px ${family}`;
-  return 4;
+function mat4Identity() {
+  return new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
 }
 
-export class AsciiRenderer {
+function mat4Multiply(out, a, b) {
+  const a00 = a[0], a01 = a[1], a02 = a[2], a03 = a[3];
+  const a10 = a[4], a11 = a[5], a12 = a[6], a13 = a[7];
+  const a20 = a[8], a21 = a[9], a22 = a[10], a23 = a[11];
+  const a30 = a[12], a31 = a[13], a32 = a[14], a33 = a[15];
+  let b0 = b[0], b1 = b[1], b2 = b[2], b3 = b[3];
+  out[0] = b0 * a00 + b1 * a10 + b2 * a20 + b3 * a30;
+  out[1] = b0 * a01 + b1 * a11 + b2 * a21 + b3 * a31;
+  out[2] = b0 * a02 + b1 * a12 + b2 * a22 + b3 * a32;
+  out[3] = b0 * a03 + b1 * a13 + b2 * a23 + b3 * a33;
+  b0 = b[4]; b1 = b[5]; b2 = b[6]; b3 = b[7];
+  out[4] = b0 * a00 + b1 * a10 + b2 * a20 + b3 * a30;
+  out[5] = b0 * a01 + b1 * a11 + b2 * a21 + b3 * a31;
+  out[6] = b0 * a02 + b1 * a12 + b2 * a22 + b3 * a32;
+  out[7] = b0 * a03 + b1 * a13 + b2 * a23 + b3 * a33;
+  b0 = b[8]; b1 = b[9]; b2 = b[10]; b3 = b[11];
+  out[8] = b0 * a00 + b1 * a10 + b2 * a20 + b3 * a30;
+  out[9] = b0 * a01 + b1 * a11 + b2 * a21 + b3 * a31;
+  out[10] = b0 * a02 + b1 * a12 + b2 * a22 + b3 * a32;
+  out[11] = b0 * a03 + b1 * a13 + b2 * a23 + b3 * a33;
+  b0 = b[12]; b1 = b[13]; b2 = b[14]; b3 = b[15];
+  out[12] = b0 * a00 + b1 * a10 + b2 * a20 + b3 * a30;
+  out[13] = b0 * a01 + b1 * a11 + b2 * a21 + b3 * a31;
+  out[14] = b0 * a02 + b1 * a12 + b2 * a22 + b3 * a32;
+  out[15] = b0 * a03 + b1 * a13 + b2 * a23 + b3 * a33;
+  return out;
+}
+
+function mat4Ortho(out, left, right, bottom, top, near, far) {
+  const lr = 1 / (left - right);
+  const bt = 1 / (bottom - top);
+  const nf = 1 / (near - far);
+  out[0] = -2 * lr;
+  out[1] = 0;
+  out[2] = 0;
+  out[3] = 0;
+  out[4] = 0;
+  out[5] = -2 * bt;
+  out[6] = 0;
+  out[7] = 0;
+  out[8] = 0;
+  out[9] = 0;
+  out[10] = 2 * nf;
+  out[11] = 0;
+  out[12] = (left + right) * lr;
+  out[13] = (top + bottom) * bt;
+  out[14] = (far + near) * nf;
+  out[15] = 1;
+  return out;
+}
+
+function mat4LookAt(out, eye, center, up) {
+  let zx = eye[0] - center[0];
+  let zy = eye[1] - center[1];
+  let zz = eye[2] - center[2];
+  let len = Math.hypot(zx, zy, zz) || 1;
+  zx /= len;
+  zy /= len;
+  zz /= len;
+
+  let xx = up[1] * zz - up[2] * zy;
+  let xy = up[2] * zx - up[0] * zz;
+  let xz = up[0] * zy - up[1] * zx;
+  len = Math.hypot(xx, xy, xz) || 1;
+  xx /= len;
+  xy /= len;
+  xz /= len;
+
+  const yx = zy * xz - zz * xy;
+  const yy = zz * xx - zx * xz;
+  const yz = zx * xy - zy * xx;
+
+  out[0] = xx;
+  out[1] = yx;
+  out[2] = zx;
+  out[3] = 0;
+  out[4] = xy;
+  out[5] = yy;
+  out[6] = zy;
+  out[7] = 0;
+  out[8] = xz;
+  out[9] = yz;
+  out[10] = zz;
+  out[11] = 0;
+  out[12] = -(xx * eye[0] + xy * eye[1] + xz * eye[2]);
+  out[13] = -(yx * eye[0] + yy * eye[1] + yz * eye[2]);
+  out[14] = -(zx * eye[0] + zy * eye[1] + zz * eye[2]);
+  out[15] = 1;
+  return out;
+}
+
+function mat4Invert(out, a) {
+  const a00 = a[0], a01 = a[1], a02 = a[2], a03 = a[3];
+  const a10 = a[4], a11 = a[5], a12 = a[6], a13 = a[7];
+  const a20 = a[8], a21 = a[9], a22 = a[10], a23 = a[11];
+  const a30 = a[12], a31 = a[13], a32 = a[14], a33 = a[15];
+
+  const b00 = a00 * a11 - a01 * a10;
+  const b01 = a00 * a12 - a02 * a10;
+  const b02 = a00 * a13 - a03 * a10;
+  const b03 = a01 * a12 - a02 * a11;
+  const b04 = a01 * a13 - a03 * a11;
+  const b05 = a02 * a13 - a03 * a12;
+  const b06 = a20 * a31 - a21 * a30;
+  const b07 = a20 * a32 - a22 * a30;
+  const b08 = a20 * a33 - a23 * a30;
+  const b09 = a21 * a32 - a22 * a31;
+  const b10 = a21 * a33 - a23 * a31;
+  const b11 = a22 * a33 - a23 * a32;
+
+  let det =
+    b00 * b11 - b01 * b10 + b02 * b09 + b03 * b08 - b04 * b07 + b05 * b06;
+  if (!det) return null;
+  det = 1 / det;
+
+  out[0] = (a11 * b11 - a12 * b10 + a13 * b09) * det;
+  out[1] = (a02 * b10 - a01 * b11 - a03 * b09) * det;
+  out[2] = (a31 * b05 - a32 * b04 + a33 * b03) * det;
+  out[3] = (a22 * b04 - a21 * b05 - a23 * b03) * det;
+  out[4] = (a12 * b08 - a10 * b11 - a13 * b07) * det;
+  out[5] = (a00 * b11 - a02 * b08 + a03 * b07) * det;
+  out[6] = (a32 * b02 - a30 * b05 - a33 * b01) * det;
+  out[7] = (a20 * b05 - a22 * b02 + a23 * b01) * det;
+  out[8] = (a10 * b10 - a11 * b08 + a13 * b06) * det;
+  out[9] = (a01 * b08 - a00 * b10 - a03 * b06) * det;
+  out[10] = (a30 * b04 - a31 * b02 + a33 * b00) * det;
+  out[11] = (a21 * b02 - a20 * b04 - a23 * b00) * det;
+  out[12] = (a11 * b07 - a10 * b09 - a12 * b06) * det;
+  out[13] = (a00 * b09 - a01 * b07 + a02 * b06) * det;
+  out[14] = (a31 * b01 - a30 * b03 - a32 * b00) * det;
+  out[15] = (a20 * b03 - a21 * b01 + a22 * b00) * det;
+  return out;
+}
+
+/** Unit cube centered at origin, size 1, with face normals. */
+function buildCubeMesh() {
+  const faces = [
+    { n: [0, 0, 1], v: [[-0.5, -0.5, 0.5], [0.5, -0.5, 0.5], [0.5, 0.5, 0.5], [-0.5, 0.5, 0.5]] },
+    { n: [0, 0, -1], v: [[0.5, -0.5, -0.5], [-0.5, -0.5, -0.5], [-0.5, 0.5, -0.5], [0.5, 0.5, -0.5]] },
+    { n: [0, 1, 0], v: [[-0.5, 0.5, 0.5], [0.5, 0.5, 0.5], [0.5, 0.5, -0.5], [-0.5, 0.5, -0.5]] },
+    { n: [0, -1, 0], v: [[-0.5, -0.5, -0.5], [0.5, -0.5, -0.5], [0.5, -0.5, 0.5], [-0.5, -0.5, 0.5]] },
+    { n: [1, 0, 0], v: [[0.5, -0.5, 0.5], [0.5, -0.5, -0.5], [0.5, 0.5, -0.5], [0.5, 0.5, 0.5]] },
+    { n: [-1, 0, 0], v: [[-0.5, -0.5, -0.5], [-0.5, -0.5, 0.5], [-0.5, 0.5, 0.5], [-0.5, 0.5, -0.5]] },
+  ];
+  const positions = [];
+  const normals = [];
+  const indices = [];
+  for (let f = 0; f < faces.length; f++) {
+    const face = faces[f];
+    const base = positions.length / 3;
+    for (let i = 0; i < 4; i++) {
+      positions.push(face.v[i][0], face.v[i][1], face.v[i][2]);
+      normals.push(face.n[0], face.n[1], face.n[2]);
+    }
+    indices.push(base, base + 1, base + 2, base, base + 2, base + 3);
+  }
+  return {
+    positions: new Float32Array(positions),
+    normals: new Float32Array(normals),
+    indices: new Uint16Array(indices),
+  };
+}
+
+const FLOATS_PER_INSTANCE = 9;
+
+export class VoxelRenderer {
   constructor(canvas) {
     this.canvas = canvas;
     const gl = canvas.getContext("webgl2", {
       alpha: false,
-      antialias: false,
-      depth: false,
+      antialias: true,
+      depth: true,
       stencil: false,
     });
     if (!gl) {
       throw new Error("WebGL2 is not available");
     }
     this.gl = gl;
-    this.cellSize = 0;
-    this.viewW = 1;
-    this.viewH = 1;
-    this.originX = 0;
-    this.originY = 0;
-    this.gridCols = 0;
-    this.gridRows = 0;
-    this.gridSize = [1, 1];
-    this.charW = 0;
-    this.charH = 0;
+    this.camX = 0;
+    this.camZ = 0;
+    this.zoom = 18;
+    this.yaw = Math.PI / 4;
+    this.pitch = Math.atan(0.55);
+    this.instanceCount = 0;
+    this.vp = mat4Identity();
+    this.invVp = mat4Identity();
+    this.tmpProj = mat4Identity();
+    this.tmpView = mat4Identity();
+    this.lightDir = new Float32Array([-0.45, 0.85, -0.3]);
 
     const vert = compile(gl, gl.VERTEX_SHADER, VERT_SRC);
     const frag = compile(gl, gl.FRAGMENT_SHADER, FRAG_SRC);
@@ -141,109 +255,49 @@ export class AsciiRenderer {
     gl.deleteShader(vert);
     gl.deleteShader(frag);
 
-    this.locChars = gl.getUniformLocation(this.program, "uChars");
-    this.locAtlas = gl.getUniformLocation(this.program, "uAtlas");
-    this.locGrid = gl.getUniformLocation(this.program, "uGridSize");
-    this.locFg = gl.getUniformLocation(this.program, "uFg");
-    this.locBg = gl.getUniformLocation(this.program, "uBg");
+    this.locVp = gl.getUniformLocation(this.program, "uVP");
+    this.locLight = gl.getUniformLocation(this.program, "uLightDir");
+
+    const mesh = buildCubeMesh();
+    this.indexCount = mesh.indices.length;
 
     this.vao = gl.createVertexArray();
     gl.bindVertexArray(this.vao);
 
-    this.atlasTex = gl.createTexture();
-    this.charTex = gl.createTexture();
-    gl.bindTexture(gl.TEXTURE_2D, this.charTex);
-    gl.texImage2D(
-      gl.TEXTURE_2D,
-      0,
-      gl.R8UI,
-      1,
-      1,
-      0,
-      gl.RED_INTEGER,
-      gl.UNSIGNED_BYTE,
-      new Uint8Array([32])
-    );
-    this.setNearest(this.charTex);
+    this.posBuf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.posBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, mesh.positions, gl.STATIC_DRAW);
+    gl.enableVertexAttribArray(0);
+    gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
 
-    gl.useProgram(this.program);
-    gl.uniform1i(this.locAtlas, 0);
-    gl.uniform1i(this.locChars, 1);
-    gl.uniform3fv(this.locFg, FG);
-    gl.uniform3fv(this.locBg, BG);
-  }
+    this.nrmBuf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.nrmBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, mesh.normals, gl.STATIC_DRAW);
+    gl.enableVertexAttribArray(1);
+    gl.vertexAttribPointer(1, 3, gl.FLOAT, false, 0, 0);
 
-  setNearest(texture) {
-    const gl = this.gl;
-    gl.bindTexture(gl.TEXTURE_2D, texture);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-  }
+    this.idxBuf = gl.createBuffer();
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.idxBuf);
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, mesh.indices, gl.STATIC_DRAW);
 
-  rebuildAtlas() {
-    const gl = this.gl;
-    const cellSize = this.cellSize;
-    const atlas = document.createElement("canvas");
-    atlas.width = ATLAS_COLS * cellSize;
-    atlas.height = ATLAS_ROWS * cellSize;
-    const ctx = atlas.getContext("2d");
-    ctx.clearRect(0, 0, atlas.width, atlas.height);
-    fitFont(ctx, cellSize);
-    ctx.fillStyle = "#fff";
-    ctx.textAlign = "left";
-    ctx.textBaseline = "alphabetic";
+    this.instanceBuf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.instanceBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, 9 * 4, gl.DYNAMIC_DRAW);
+    const stride = FLOATS_PER_INSTANCE * 4;
+    gl.enableVertexAttribArray(2);
+    gl.vertexAttribPointer(2, 3, gl.FLOAT, false, stride, 0);
+    gl.vertexAttribDivisor(2, 1);
+    gl.enableVertexAttribArray(3);
+    gl.vertexAttribPointer(3, 3, gl.FLOAT, false, stride, 12);
+    gl.vertexAttribDivisor(3, 1);
+    gl.enableVertexAttribArray(4);
+    gl.vertexAttribPointer(4, 3, gl.FLOAT, false, stride, 24);
+    gl.vertexAttribDivisor(4, 1);
 
-    for (let code = 33; code < 127; code++) {
-      const ch = String.fromCharCode(code);
-      if (CUSTOM_CHARS.has(ch)) continue;
-      const col = code % ATLAS_COLS;
-      const row = Math.floor(code / ATLAS_COLS);
-      const metrics = ctx.measureText(ch);
-      const glyphW = metrics.width;
-      const ascent = metrics.actualBoundingBoxAscent || 0;
-      const descent = metrics.actualBoundingBoxDescent || 0;
-      const x = col * cellSize + (cellSize - glyphW) / 2;
-      const y = row * cellSize + (cellSize + ascent - descent) / 2;
-      ctx.fillText(ch, x, y);
-    }
-
-    const customGlyphs = MATERIALS.filter((mat) => mat.fill).map((mat) => {
-      const col = mat.char.charCodeAt(0) % ATLAS_COLS;
-      const row = Math.floor(mat.char.charCodeAt(0) / ATLAS_COLS);
-      const ox = col * cellSize;
-      const oy = row * cellSize;
-      if (mat.fill === "block") {
-        return [mat.char, () => ctx.fillRect(ox, oy, cellSize, cellSize)];
-      }
-      if (mat.fill === "circle") {
-        const cx = ox + cellSize / 2;
-        const cy = oy + cellSize / 2;
-        return [
-          mat.char,
-          () => {
-            ctx.beginPath();
-            ctx.arc(cx, cy, cellSize * 0.38, 0, Math.PI * 2);
-            ctx.fill();
-          },
-        ];
-      }
-      return null;
-    }).filter(Boolean);
-    for (const [ch, draw] of customGlyphs) {
-      const code = ch.charCodeAt(0);
-      const col = code % ATLAS_COLS;
-      const row = Math.floor(code / ATLAS_COLS);
-      draw(col * cellSize, row * cellSize);
-    }
-
-    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
-    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
-    gl.bindTexture(gl.TEXTURE_2D, this.atlasTex);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, atlas);
-    this.setNearest(this.atlasTex);
-    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+    gl.bindVertexArray(null);
+    gl.enable(gl.DEPTH_TEST);
+    gl.enable(gl.CULL_FACE);
+    gl.cullFace(gl.BACK);
   }
 
   resize() {
@@ -256,93 +310,101 @@ export class AsciiRenderer {
       this.canvas.width = bufW;
       this.canvas.height = bufH;
     }
-
-    const cellSize = Math.max(1, Math.round(CELL_SIZE * dpr));
-    const cols = Math.max(1, Math.floor(bufW / cellSize));
-    const rows = Math.max(1, Math.floor(bufH / cellSize));
-    this.viewW = cols * cellSize;
-    this.viewH = rows * cellSize;
-    this.originX = Math.floor((bufW - this.viewW) / 2);
-    this.originY = Math.floor((bufH - this.viewH) / 2);
-    this.gridCols = cols;
-    this.gridRows = rows;
     this.dpr = dpr;
-
-    if (cellSize !== this.cellSize) {
-      this.cellSize = cellSize;
-      this.rebuildAtlas();
-    }
-
-    return { cols, rows };
+    this.aspect = bufW / Math.max(1, bufH);
+    return { width: bufW, height: bufH, aspect: this.aspect };
   }
 
-  cellAt(clientX, clientY) {
-    const rect = this.canvas.getBoundingClientRect();
-    const cssX = clientX - rect.left;
-    const cssY = clientY - rect.top;
-    const scaleX = this.canvas.width / Math.max(1, rect.width);
-    const scaleY = this.canvas.height / Math.max(1, rect.height);
-    const bufX = cssX * scaleX;
-    const bufY = cssY * scaleY;
-    const localX = bufX - this.originX;
-    const localY = bufY - this.originY;
-    if (
-      localX < 0 ||
-      localY < 0 ||
-      localX >= this.viewW ||
-      localY >= this.viewH ||
-      this.cellSize <= 0
-    ) {
-      return null;
-    }
-    const col = Math.floor(localX / this.cellSize);
-    const row = Math.floor(localY / this.cellSize);
-    if (col < 0 || row < 0 || col >= this.gridCols || row >= this.gridRows) {
-      return null;
-    }
-    return { col, row };
+  setCamera(camX, camZ, zoom) {
+    this.camX = camX;
+    this.camZ = camZ;
+    if (zoom != null) this.zoom = zoom;
   }
 
-  upload(grid) {
+  /** Half-extent of the ground plane visible at current zoom (map cells). */
+  viewRadius() {
+    const halfH = this.zoom;
+    const halfW = this.zoom * this.aspect;
+    return Math.ceil(Math.hypot(halfW, halfH) * 1.35);
+  }
+
+  uploadInstances(data) {
     const gl = this.gl;
-    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
-    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
-    gl.bindTexture(gl.TEXTURE_2D, this.charTex);
-    gl.texImage2D(
-      gl.TEXTURE_2D,
-      0,
-      gl.R8UI,
-      grid.cols,
-      grid.rows,
-      0,
-      gl.RED_INTEGER,
-      gl.UNSIGNED_BYTE,
-      grid.cells
-    );
-    this.setNearest(this.charTex);
-    this.charW = grid.cols;
-    this.charH = grid.rows;
-    this.gridSize[0] = grid.cols;
-    this.gridSize[1] = grid.rows;
+    const count = Math.floor(data.length / FLOATS_PER_INSTANCE);
+    this.instanceCount = count;
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.instanceBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, data, gl.DYNAMIC_DRAW);
+  }
+
+  updateMatrices() {
+    const eyeDist = this.zoom * 2.4;
+    const cy = Math.sin(this.pitch) * eyeDist;
+    const ch = Math.cos(this.pitch) * eyeDist;
+    const eyeX = this.camX + Math.sin(this.yaw) * ch;
+    const eyeZ = this.camZ + Math.cos(this.yaw) * ch;
+    const eye = [eyeX, cy, eyeZ];
+    const center = [this.camX, 0, this.camZ];
+    const up = [0, 1, 0];
+
+    mat4LookAt(this.tmpView, eye, center, up);
+    const halfH = this.zoom;
+    const halfW = this.zoom * this.aspect;
+    mat4Ortho(this.tmpProj, -halfW, halfW, -halfH, halfH, -eyeDist * 4, eyeDist * 8);
+    mat4Multiply(this.vp, this.tmpProj, this.tmpView);
+    mat4Invert(this.invVp, this.vp);
   }
 
   draw() {
     const gl = this.gl;
-    gl.disable(gl.DEPTH_TEST);
-    gl.disable(gl.BLEND);
-    gl.bindVertexArray(this.vao);
+    this.updateMatrices();
     gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
     gl.clearColor(BG[0], BG[1], BG[2], 1);
-    gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+    if (this.instanceCount <= 0) return;
 
     gl.useProgram(this.program);
-    gl.uniform2f(this.locGrid, this.gridSize[0], this.gridSize[1]);
-    gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, this.atlasTex);
-    gl.activeTexture(gl.TEXTURE1);
-    gl.bindTexture(gl.TEXTURE_2D, this.charTex);
+    gl.uniformMatrix4fv(this.locVp, false, this.vp);
+    gl.uniform3fv(this.locLight, this.lightDir);
+    gl.bindVertexArray(this.vao);
+    gl.drawElementsInstanced(
+      gl.TRIANGLES,
+      this.indexCount,
+      gl.UNSIGNED_SHORT,
+      0,
+      this.instanceCount
+    );
+  }
 
-    gl.viewport(this.originX, this.originY, this.viewW, this.viewH);
-    gl.drawArrays(gl.TRIANGLES, 0, 3);
+  /**
+   * Map a screen point to ground-plane (y=0) map coordinates.
+   * @returns {{ x: number, z: number } | null}
+   */
+  pickGround(clientX, clientY) {
+    this.updateMatrices();
+    const rect = this.canvas.getBoundingClientRect();
+    const ndcX = ((clientX - rect.left) / Math.max(1, rect.width)) * 2 - 1;
+    const ndcY = 1 - ((clientY - rect.top) / Math.max(1, rect.height)) * 2;
+    const inv = this.invVp;
+    if (!inv) return null;
+
+    function unproject(nx, ny, nz) {
+      const x = inv[0] * nx + inv[4] * ny + inv[8] * nz + inv[12];
+      const y = inv[1] * nx + inv[5] * ny + inv[9] * nz + inv[13];
+      const z = inv[2] * nx + inv[6] * ny + inv[10] * nz + inv[14];
+      const w = inv[3] * nx + inv[7] * ny + inv[11] * nz + inv[15];
+      const iw = w !== 0 ? 1 / w : 1;
+      return [x * iw, y * iw, z * iw];
+    }
+
+    const near = unproject(ndcX, ndcY, -1);
+    const far = unproject(ndcX, ndcY, 1);
+    const dx = far[0] - near[0];
+    const dy = far[1] - near[1];
+    const dz = far[2] - near[2];
+    if (Math.abs(dy) < 1e-8) return null;
+    const t = -near[1] / dy;
+    if (t < 0) return null;
+    return { x: near[0] + dx * t, z: near[2] + dz * t };
   }
 }

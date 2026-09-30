@@ -22,6 +22,8 @@ const BUILDING_GAP = 1;
 const BUILDING_MIN_W = 8;
 const BUILDING_MIN_D = 5;
 const BUILDING_MAX_W = 40;
+const BUILDING_MIN_H = 2;
+const BUILDING_MAX_H = 28;
 export const STRIDE_X = OUTER_W + ROAD_W;
 export const STRIDE_Y = OUTER_H + ROAD_H;
 
@@ -58,6 +60,10 @@ function blockOriginX(bx) {
 
 function blockOriginY(by) {
   return ROAD_H + (BLOCKS_Y - 1 - by) * STRIDE_Y;
+}
+
+export function blockOrigin(bx, by) {
+  return { x: blockOriginX(bx), y: blockOriginY(by) };
 }
 
 export function avenueX(index) {
@@ -157,7 +163,8 @@ function subdivideX(buildings, rng, x, y, w, d, depth) {
 
   if (preferLeaf || !canSplit) {
     if (w >= BUILDING_MIN_W && d >= BUILDING_MIN_D) {
-      buildings.push({ x, y, w, d });
+      const h = randInt(rng, BUILDING_MIN_H, BUILDING_MAX_H);
+      buildings.push({ x, y, w, d, h });
     }
     return;
   }
@@ -224,12 +231,16 @@ function hitBuilding(b, lx, ly) {
   return lx >= b.x && lx < b.x + b.w && ly >= b.y && ly < b.y + b.d;
 }
 
-function buildingCharAt(bx, by, lx, ly) {
+function buildingAtLocal(bx, by, lx, ly) {
   const buildings = buildingsForBlock(bx, by);
   for (let i = 0; i < buildings.length; i++) {
-    if (hitBuilding(buildings[i], lx, ly)) return MAT_SKYSCRAPER.char;
+    if (hitBuilding(buildings[i], lx, ly)) return buildings[i];
   }
   return null;
+}
+
+function buildingCharAt(bx, by, lx, ly) {
+  return buildingAtLocal(bx, by, lx, ly) ? MAT_SKYSCRAPER.char : null;
 }
 
 export function cellChar(x, y) {
@@ -244,6 +255,35 @@ export function cellChar(x, y) {
   const building = buildingCharAt(block.bx, block.by, block.lx, block.ly);
   if (building) return building;
   return " ";
+}
+
+/** @returns {{ color: number[], h: number } | null} */
+export function cellVoxel(x, y) {
+  const block = blockLocalAt(x, y);
+  if (!block) return null;
+
+  if (inSidewalk(block.lx, block.ly)) {
+    if (isStreetlamp(block.lx, block.ly, x, y)) {
+      return { color: MAT_STREETLAMP.color, h: 3 };
+    }
+    return { color: MAT_SIDEWALK.color, h: 1 };
+  }
+
+  const building = buildingAtLocal(block.bx, block.by, block.lx, block.ly);
+  if (building) {
+    return { color: MAT_SKYSCRAPER.color, h: building.h };
+  }
+  return null;
+}
+
+/** Sidewalk / lamp only (excludes building footprints). */
+export function sidewalkVoxel(x, y) {
+  const block = blockLocalAt(x, y);
+  if (!block || !inSidewalk(block.lx, block.ly)) return null;
+  if (isStreetlamp(block.lx, block.ly, x, y)) {
+    return { color: MAT_STREETLAMP.color, h: 3 };
+  }
+  return { color: MAT_SIDEWALK.color, h: 1 };
 }
 
 function roadCorridorAt(x, y) {
