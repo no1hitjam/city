@@ -6,27 +6,58 @@ layout(location = 1) in vec3 aNormal;
 layout(location = 2) in vec3 aOffset;
 layout(location = 3) in vec3 aScale;
 layout(location = 4) in vec3 aColor;
+layout(location = 5) in float aEmissive;
 
 uniform mat4 uVP;
 uniform vec3 uLightDir;
 
-out vec3 vColor;
+out vec3 vWorld;
+out vec3 vAlbedo;
+out float vShade;
+out float vEmissive;
 
 void main() {
   vec3 world = aPos * aScale + aOffset;
   gl_Position = uVP * vec4(world, 1.0);
   float ndl = max(dot(normalize(aNormal), normalize(uLightDir)), 0.0);
-  float shade = 0.35 + 0.65 * ndl;
-  vColor = aColor * shade;
+  vWorld = world;
+  vAlbedo = aColor;
+  vShade = 0.4 + 0.6 * ndl;
+  vEmissive = aEmissive;
 }
 `;
 
 const FRAG_SRC = `#version 300 es
 precision highp float;
-in vec3 vColor;
+precision highp sampler2D;
+
+uniform sampler2D uLightmap;
+uniform vec2 uLightOrigin;
+uniform vec2 uLightSize;
+uniform float uLightScale;
+uniform float uHeightFalloff;
+
+in vec3 vWorld;
+in vec3 vAlbedo;
+in float vShade;
+in float vEmissive;
 out vec4 oColor;
+
+vec3 sampleTileLight(vec3 world) {
+  ivec2 tile = ivec2(floor(world.xz));
+  ivec2 origin = ivec2(uLightOrigin);
+  ivec2 size = ivec2(uLightSize);
+  ivec2 cell = clamp(tile - origin, ivec2(0), size - ivec2(1));
+  vec3 L = texelFetch(uLightmap, cell, 0).rgb * uLightScale;
+  // Step height attenuation per voxel layer, not smoothly.
+  float layer = floor(max(world.y, 0.0));
+  float hf = 1.0 / (1.0 + layer * uHeightFalloff);
+  return L * hf;
+}
+
 void main() {
-  oColor = vec4(vColor, 1.0);
+  vec3 lit = vAlbedo * sampleTileLight(vWorld) * vShade;
+  oColor = vec4(mix(lit, vAlbedo * 1.35, vEmissive), 1.0);
 }
 `;
 
@@ -222,7 +253,7 @@ function buildCubeMesh() {
   };
 }
 
-const FLOATS_PER_INSTANCE = 9;
+const FLOATS_PER_INSTANCE = 10;
 
 export class VoxelRenderer {
   constructor(canvas) {
@@ -247,7 +278,11 @@ export class VoxelRenderer {
     this.invVp = mat4Identity();
     this.tmpProj = mat4Identity();
     this.tmpView = mat4Identity();
-    this.lightDir = new Float32Array([-0.45, 0.85, -0.3]);
+    this.lightDir = new Float32Array([-0.35, 0.9, -0.25]);
+    this.lightOrigin = new Float32Array([0, 0]);
+    this.lightSize = new Float32Array([1, 1]);
+    this.lightScale = 2.5;
+    this.heightFalloff = 0.11;
 
     const vert = compile(gl, gl.VERTEX_SHADER, VERT_SRC);
     const frag = compile(gl, gl.FRAGMENT_SHADER, FRAG_SRC);
@@ -257,6 +292,11 @@ export class VoxelRenderer {
 
     this.locVp = gl.getUniformLocation(this.program, "uVP");
     this.locLight = gl.getUniformLocation(this.program, "uLightDir");
+    this.locLightmap = gl.getUniformLocation(this.program, "uLightmap");
+    this.locLightOrigin = gl.getUniformLocation(this.program, "uLightOrigin");
+    this.locLightSize = gl.getUniformLocation(this.program, "uLightSize");
+    this.locLightScale = gl.getUniformLocation(this.program, "uLightScale");
+    this.locHeightFalloff = gl.getUniformLocation(this.program, "uHeightFalloff");
 
     const mesh = buildCubeMesh();
     this.indexCount = mesh.indices.length;
@@ -282,7 +322,7 @@ export class VoxelRenderer {
 
     this.instanceBuf = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, this.instanceBuf);
-    gl.bufferData(gl.ARRAY_BUFFER, 9 * 4, gl.DYNAMIC_DRAW);
+    gl.bufferData(gl.ARRAY_BUFFER, FLOATS_PER_INSTANCE * 4, gl.DYNAMIC_DRAW);
     const stride = FLOATS_PER_INSTANCE * 4;
     gl.enableVertexAttribArray(2);
     gl.vertexAttribPointer(2, 3, gl.FLOAT, false, stride, 0);
@@ -293,11 +333,35 @@ export class VoxelRenderer {
     gl.enableVertexAttribArray(4);
     gl.vertexAttribPointer(4, 3, gl.FLOAT, false, stride, 24);
     gl.vertexAttribDivisor(4, 1);
+    gl.enableVertexAttribArray(5);
+    gl.vertexAttribPointer(5, 1, gl.FLOAT, false, stride, 36);
+    gl.vertexAttribDivisor(5, 1);
+
+    this.lightTex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, this.lightTex);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texImage2D(
+      gl.TEXTURE_2D,
+      0,
+      gl.RGBA,
+      1,
+      1,
+      0,
+      gl.RGBA,
+      gl.UNSIGNED_BYTE,
+      new Uint8Array([20, 25, 22, 255])
+    );
 
     gl.bindVertexArray(null);
     gl.enable(gl.DEPTH_TEST);
     gl.enable(gl.CULL_FACE);
     gl.cullFace(gl.BACK);
+
+    gl.useProgram(this.program);
+    gl.uniform1i(this.locLightmap, 0);
   }
 
   resize() {
@@ -325,7 +389,24 @@ export class VoxelRenderer {
   viewRadius() {
     const halfH = this.zoom;
     const halfW = this.zoom * this.aspect;
-    return Math.ceil(Math.hypot(halfW, halfH) * 1.35);
+    return Math.ceil(Math.hypot(halfW, halfH) * 1.4);
+  }
+
+  /**
+   * World-space tile bounds to mesh, padded more toward the camera
+   * (screen-bottom) so buildings don't pop in while panning down.
+   */
+  viewBounds(camX, camZ) {
+    const radius = this.viewRadius();
+    const downExtra = Math.ceil(radius * 0.95);
+    const dx = Math.sin(this.yaw);
+    const dz = Math.cos(this.yaw);
+    return {
+      x0: Math.floor(camX - radius + Math.min(0, dx) * downExtra),
+      z0: Math.floor(camZ - radius + Math.min(0, dz) * downExtra),
+      x1: Math.ceil(camX + radius + Math.max(0, dx) * downExtra),
+      z1: Math.ceil(camZ + radius + Math.max(0, dz) * downExtra),
+    };
   }
 
   uploadInstances(data) {
@@ -334,6 +415,35 @@ export class VoxelRenderer {
     this.instanceCount = count;
     gl.bindBuffer(gl.ARRAY_BUFFER, this.instanceBuf);
     gl.bufferData(gl.ARRAY_BUFFER, data, gl.DYNAMIC_DRAW);
+  }
+
+  /**
+   * Upload a tile lightmap. bytes is RGBA8 packed (see lighting.js).
+   * @param {{ originX: number, originZ: number, w: number, h: number, rgba: Uint8Array }} map
+   * @param {number} decodeScale
+   * @param {number} heightFalloff
+   */
+  uploadLightmap(map, decodeScale, heightFalloff) {
+    const gl = this.gl;
+    this.lightOrigin[0] = map.originX;
+    this.lightOrigin[1] = map.originZ;
+    this.lightSize[0] = map.w;
+    this.lightSize[1] = map.h;
+    this.lightScale = decodeScale;
+    this.heightFalloff = heightFalloff;
+    gl.bindTexture(gl.TEXTURE_2D, this.lightTex);
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+    gl.texImage2D(
+      gl.TEXTURE_2D,
+      0,
+      gl.RGBA,
+      map.w,
+      map.h,
+      0,
+      gl.RGBA,
+      gl.UNSIGNED_BYTE,
+      map.rgba.subarray(0, map.w * map.h * 4)
+    );
   }
 
   updateMatrices() {
@@ -366,6 +476,12 @@ export class VoxelRenderer {
     gl.useProgram(this.program);
     gl.uniformMatrix4fv(this.locVp, false, this.vp);
     gl.uniform3fv(this.locLight, this.lightDir);
+    gl.uniform2fv(this.locLightOrigin, this.lightOrigin);
+    gl.uniform2fv(this.locLightSize, this.lightSize);
+    gl.uniform1f(this.locLightScale, this.lightScale);
+    gl.uniform1f(this.locHeightFalloff, this.heightFalloff);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, this.lightTex);
     gl.bindVertexArray(this.vao);
     gl.drawElementsInstanced(
       gl.TRIANGLES,

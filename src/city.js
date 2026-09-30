@@ -4,8 +4,8 @@ export const BLOCKS_X = 100;
 export const BLOCKS_Y = 100;
 export const BLOCK_W = 72;
 export const BLOCK_H = 30;
-export const ROAD_W = 3;
-export const ROAD_H = 3;
+export const ROAD_W = 9;
+export const ROAD_H = 9;
 
 const OUTER_W = BLOCK_W + 2;
 const OUTER_H = BLOCK_H + 2;
@@ -124,6 +124,12 @@ function isStreetlamp(lx, ly, x, y) {
     if (y % LAMP_INTERVAL === 0) return true;
   }
   return false;
+}
+
+export function isStreetlampAt(x, y) {
+  const block = blockLocalAt(x, y);
+  if (!block) return false;
+  return isStreetlamp(block.lx, block.ly, x, y);
 }
 
 function sidewalkRoadAt(lx, ly, bx, by) {

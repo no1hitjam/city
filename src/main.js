@@ -10,19 +10,29 @@ import {
   blockOrigin,
   buildingsForBlock,
   sidewalkVoxel,
+  isStreetlampAt,
   roadAt,
   roadLabel,
 } from "./city.js";
-import { MAT_SKYSCRAPER } from "./materials.js";
+import { MAT_ROOF, MAT_SKYSCRAPER } from "./materials.js";
+import {
+  TileLightmap,
+  LAMP_RADIUS,
+  LIGHT_TEX_SCALE,
+  HEIGHT_FALLOFF,
+} from "./lighting.js";
+import { paintFleet } from "./vehicles.js";
 
-const ROAD_COLOR = [0x18 / 255, 0x22 / 255, 0x1a / 255];
+const ROAD_COLOR = [0x0c / 255, 0x0e / 255, 0x14 / 255];
 const MIN_ZOOM = 8;
 const MAX_ZOOM = 80;
-const FLOATS_PER = 9;
+const FLOATS_PER = 10;
+const LAMP_GRID = 16;
 
 const canvas = document.querySelector("#view");
 const infoValue = document.querySelector("#info-value");
 const renderer = new VoxelRenderer(canvas);
+const lightmap = new TileLightmap();
 
 const map = mapSize();
 let camX = map.cols * 0.5;
@@ -30,6 +40,7 @@ let camZ = map.rows * 0.5;
 let zoom = 28;
 let hoverLabel = "";
 let drag = null;
+let timeSec = 0;
 
 const instanceScratch = new Float32Array(256 * 1024 * FLOATS_PER);
 
@@ -37,7 +48,7 @@ function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
-function pushBox(data, count, ox, oy, oz, sx, sy, sz, color) {
+function pushBox(data, count, ox, oy, oz, sx, sy, sz, color, emissive = 0) {
   const i = count * FLOATS_PER;
   data[i] = ox;
   data[i + 1] = oy;
@@ -48,29 +59,61 @@ function pushBox(data, count, ox, oy, oz, sx, sy, sz, color) {
   data[i + 6] = color[0];
   data[i + 7] = color[1];
   data[i + 8] = color[2];
+  data[i + 9] = emissive;
   return count + 1;
 }
 
+function rebuildLightmap(x0, z0, x1, z1) {
+  const pad = LAMP_RADIUS + 1;
+  const lx0 = Math.max(0, x0 - pad);
+  const lz0 = Math.max(0, z0 - pad);
+  const lx1 = Math.min(map.cols, x1 + pad);
+  const lz1 = Math.min(map.rows, z1 + pad);
+  lightmap.begin(lx0, lz0, lx1, lz1);
+
+  // Lamps only occur on the world-aligned LAMP_GRID; test those candidates.
+  const startX = Math.floor(lx0 / LAMP_GRID) * LAMP_GRID;
+  const startZ = Math.floor(lz0 / LAMP_GRID) * LAMP_GRID;
+  for (let z = startZ; z < lz1; z += LAMP_GRID) {
+    for (let x = lx0; x < lx1; x++) {
+      if (isStreetlampAt(x, z)) lightmap.stampLamp(x + 0.5, z + 0.5);
+    }
+  }
+  for (let x = startX; x < lx1; x += LAMP_GRID) {
+    for (let z = lz0; z < lz1; z++) {
+      if (z % LAMP_GRID === 0) continue;
+      if (isStreetlampAt(x, z)) lightmap.stampLamp(x + 0.5, z + 0.5);
+    }
+  }
+
+  lightmap.toTextureBytes();
+  renderer.uploadLightmap(lightmap, LIGHT_TEX_SCALE, HEIGHT_FALLOFF);
+}
+
 function paintVoxels() {
-  const radius = renderer.viewRadius();
-  const x0 = Math.max(0, Math.floor(camX - radius));
-  const z0 = Math.max(0, Math.floor(camZ - radius));
-  const x1 = Math.min(map.cols, Math.ceil(camX + radius));
-  const z1 = Math.min(map.rows, Math.ceil(camZ + radius));
+  const bounds = renderer.viewBounds(camX, camZ);
+  const x0 = Math.max(0, bounds.x0);
+  const z0 = Math.max(0, bounds.z0);
+  const x1 = Math.min(map.cols, bounds.x1);
+  const z1 = Math.min(map.rows, bounds.z1);
+
+  rebuildLightmap(x0, z0, x1, z1);
+
   const data = instanceScratch;
   const maxCount = Math.floor(data.length / FLOATS_PER);
   let count = 0;
 
-  const groundSize = radius * 2.5;
+  const groundW = Math.max(x1 - x0, 1) + 4;
+  const groundD = Math.max(z1 - z0, 1) + 4;
   count = pushBox(
     data,
     count,
-    camX,
+    (x0 + x1) * 0.5,
     -0.5,
-    camZ,
-    groundSize,
+    (z0 + z1) * 0.5,
+    groundW,
     1,
-    groundSize,
+    groundD,
     ROAD_COLOR
   );
 
@@ -97,7 +140,11 @@ function paintVoxels() {
           continue;
         }
         for (let layer = 0; layer < b.h && count < maxCount; layer++) {
-          const shade = 0.82 + 0.18 * ((layer * 17 + b.w) % 5) / 4;
+          const isRoof = layer === b.h - 1;
+          const base = isRoof ? MAT_ROOF.color : MAT_SKYSCRAPER.color;
+          const shade = isRoof
+            ? 1
+            : 0.82 + 0.18 * (((layer * 17 + b.w) % 5) / 4);
           count = pushBox(
             data,
             count,
@@ -107,11 +154,7 @@ function paintVoxels() {
             b.w,
             1,
             b.d,
-            [
-              MAT_SKYSCRAPER.color[0] * shade,
-              MAT_SKYSCRAPER.color[1] * shade,
-              MAT_SKYSCRAPER.color[2] * shade,
-            ]
+            [base[0] * shade, base[1] * shade, base[2] * shade]
           );
         }
       }
@@ -122,6 +165,7 @@ function paintVoxels() {
     for (let x = x0; x < x1 && count < maxCount; x++) {
       const vox = sidewalkVoxel(x, z);
       if (!vox) continue;
+      const lamp = isStreetlampAt(x, z);
       count = pushBox(
         data,
         count,
@@ -131,10 +175,23 @@ function paintVoxels() {
         1,
         vox.h,
         1,
-        vox.color
+        vox.color,
+        lamp ? 1 : 0
       );
     }
   }
+
+  count = paintFleet(
+    timeSec,
+    data,
+    count,
+    maxCount,
+    x0,
+    z0,
+    x1,
+    z1,
+    pushBox
+  );
 
   renderer.uploadInstances(data.subarray(0, count * FLOATS_PER));
 }
@@ -182,6 +239,12 @@ function render() {
   renderer.draw();
 }
 
+function frame(nowMs) {
+  timeSec = nowMs * 0.001;
+  render();
+  requestAnimationFrame(frame);
+}
+
 function endDrag(event) {
   if (!drag || drag.pointerId !== event.pointerId) return;
   drag = null;
@@ -200,7 +263,6 @@ function panFromScreenDelta(dxPx, dyPx) {
   const worldDy = (dyPx / canvas.height) * halfH * 2;
   const cos = Math.cos(renderer.yaw);
   const sin = Math.sin(renderer.yaw);
-  // Screen +x goes along camera right; screen +y goes along camera up-on-ground.
   camX -= worldDx * cos + worldDy * sin;
   camZ -= -worldDx * sin + worldDy * cos;
 }
@@ -216,14 +278,12 @@ window.addEventListener("keydown", (event) => {
   else if (event.key === "-" || event.key === "_") zoom *= 1.1;
   else return;
   event.preventDefault();
-  render();
 });
 
 canvas.addEventListener("wheel", (event) => {
   event.preventDefault();
   const factor = event.deltaY > 0 ? 1.08 : 1 / 1.08;
   zoom *= factor;
-  render();
 }, { passive: false });
 
 canvas.addEventListener("pointerdown", (event) => {
@@ -249,7 +309,6 @@ canvas.addEventListener("pointermove", (event) => {
     panFromScreenDelta(point.x - drag.x, point.y - drag.y);
     drag.x = point.x;
     drag.y = point.y;
-    render();
   }
   updateHover(event.clientX, event.clientY);
 });
@@ -261,5 +320,4 @@ canvas.addEventListener("pointerleave", () => {
   if (!drag) setInfo("");
 });
 
-window.addEventListener("resize", render);
-render();
+requestAnimationFrame(frame);

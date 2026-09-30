@@ -16,4 +16,10 @@ export const MAT_SKYSCRAPER = {
   fill: "block",
 };
 
-export const MATERIALS = [MAT_SIDEWALK, MAT_STREETLAMP, MAT_SKYSCRAPER];
+export const MAT_ROOF = {
+  char: "R",
+  color: [0x0a / 255, 0x0a / 255, 0x0a / 255],
+  fill: "block",
+};
+
+export const MATERIALS = [MAT_SIDEWALK, MAT_STREETLAMP, MAT_SKYSCRAPER, MAT_ROOF];
