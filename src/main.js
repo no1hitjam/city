@@ -14,20 +14,23 @@ import {
   roadAt,
   roadLabel,
 } from "./city.js";
-import { MAT_ROOF, MAT_SKYSCRAPER } from "./materials.js";
+import { MAT_ROOF, MAT_SKYSCRAPER, MAT_STREETLAMP } from "./materials.js";
 import {
   TileLightmap,
   LAMP_RADIUS,
   LIGHT_TEX_SCALE,
   HEIGHT_FALLOFF,
 } from "./lighting.js";
-import { paintFleet } from "./vehicles.js";
+import { paintFleet, stampCarLights, stampSignalLights } from "./vehicles.js";
 
 const ROAD_COLOR = [0x0c / 255, 0x0e / 255, 0x14 / 255];
+const LAMP_POLE_COLOR = [0x2a / 255, 0x2c / 255, 0x32 / 255];
+const LAMP_HOUSING_COLOR = [0x14 / 255, 0x14 / 255, 0x18 / 255];
 const MIN_ZOOM = 8;
 const MAX_ZOOM = 80;
 const FLOATS_PER = 10;
 const LAMP_GRID = 16;
+const LAMP_POLE_H = 3.4;
 
 const canvas = document.querySelector("#view");
 const infoValue = document.querySelector("#info-value");
@@ -63,6 +66,67 @@ function pushBox(data, count, ox, oy, oz, sx, sy, sz, color, emissive = 0) {
   return count + 1;
 }
 
+/** Dark pole + lantern housing with a bright emissive bulb. */
+function paintStreetlamp(data, count, maxCount, x, z) {
+  const cx = x + 0.5;
+  const cz = z + 0.5;
+  const headY = LAMP_POLE_H + 0.2;
+
+  count = pushBox(data, count, cx, 0.12, cz, 0.38, 0.24, 0.38, LAMP_POLE_COLOR);
+  if (count >= maxCount) return count;
+  count = pushBox(
+    data,
+    count,
+    cx,
+    LAMP_POLE_H * 0.5,
+    cz,
+    0.14,
+    LAMP_POLE_H,
+    0.14,
+    LAMP_POLE_COLOR
+  );
+  if (count >= maxCount) return count;
+  // Dark collar under the bulb.
+  count = pushBox(
+    data,
+    count,
+    cx,
+    headY - 0.2,
+    cz,
+    0.34,
+    0.1,
+    0.34,
+    LAMP_HOUSING_COLOR
+  );
+  if (count >= maxCount) return count;
+  // Glowing bulb (current streetlamp color).
+  count = pushBox(
+    data,
+    count,
+    cx,
+    headY,
+    cz,
+    0.3,
+    0.28,
+    0.3,
+    MAT_STREETLAMP.color,
+    1
+  );
+  if (count >= maxCount) return count;
+  // Dark cap above the bulb.
+  return pushBox(
+    data,
+    count,
+    cx,
+    headY + 0.22,
+    cz,
+    0.36,
+    0.1,
+    0.36,
+    LAMP_HOUSING_COLOR
+  );
+}
+
 function rebuildLightmap(x0, z0, x1, z1) {
   const pad = LAMP_RADIUS + 1;
   const lx0 = Math.max(0, x0 - pad);
@@ -85,6 +149,9 @@ function rebuildLightmap(x0, z0, x1, z1) {
       if (isStreetlampAt(x, z)) lightmap.stampLamp(x + 0.5, z + 0.5);
     }
   }
+
+  stampCarLights(lightmap);
+  stampSignalLights(lightmap, timeSec);
 
   lightmap.toTextureBytes();
   renderer.uploadLightmap(lightmap, LIGHT_TEX_SCALE, HEIGHT_FALLOFF);
@@ -165,7 +232,6 @@ function paintVoxels() {
     for (let x = x0; x < x1 && count < maxCount; x++) {
       const vox = sidewalkVoxel(x, z);
       if (!vox) continue;
-      const lamp = isStreetlampAt(x, z);
       count = pushBox(
         data,
         count,
@@ -175,9 +241,12 @@ function paintVoxels() {
         1,
         vox.h,
         1,
-        vox.color,
-        lamp ? 1 : 0
+        vox.color
       );
+      if (count >= maxCount) break;
+      if (isStreetlampAt(x, z)) {
+        count = paintStreetlamp(data, count, maxCount, x, z);
+      }
     }
   }
 

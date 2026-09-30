@@ -6,7 +6,7 @@ export const MAT_SIDEWALK = {
 
 export const MAT_STREETLAMP = {
   char: "o",
-  color: [0xff / 255, 0xee / 255, 0x88 / 255],
+  color: [0x88 / 255, 0xaa / 255, 0xff / 255],
   fill: "circle",
 };
 

@@ -3,12 +3,12 @@ import { MAT_STREETLAMP } from "./materials.js";
 /** How many tiles a lamp reaches. */
 export const LAMP_RADIUS = 14;
 /** Peak brightness at the lamp tile. */
-export const LAMP_INTENSITY = 1.65;
+export const LAMP_INTENSITY = 0.95;
 /** Soft night fill so unlit tiles stay readable. */
 export const AMBIENT_LIGHT = [0.055, 0.07, 0.06];
 /** Extra attenuation per voxel of height above ground. */
 export const HEIGHT_FALLOFF = 0.3;
-/** Warm lamp tint (matches streetlamp material). */
+/** Cool blue lamp tint (matches streetlamp material). */
 export const LAMP_COLOR = MAT_STREETLAMP.color;
 
 /** Decode scale baked into the RGBA8 lightmap texture. */

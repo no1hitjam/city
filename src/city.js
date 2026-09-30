@@ -269,9 +269,6 @@ export function cellVoxel(x, y) {
   if (!block) return null;
 
   if (inSidewalk(block.lx, block.ly)) {
-    if (isStreetlamp(block.lx, block.ly, x, y)) {
-      return { color: MAT_STREETLAMP.color, h: 3 };
-    }
     return { color: MAT_SIDEWALK.color, h: 1 };
   }
 
@@ -282,13 +279,10 @@ export function cellVoxel(x, y) {
   return null;
 }
 
-/** Sidewalk / lamp only (excludes building footprints). */
+/** Sidewalk only (excludes building footprints). Lamps are painted separately. */
 export function sidewalkVoxel(x, y) {
   const block = blockLocalAt(x, y);
   if (!block || !inSidewalk(block.lx, block.ly)) return null;
-  if (isStreetlamp(block.lx, block.ly, x, y)) {
-    return { color: MAT_STREETLAMP.color, h: 3 };
-  }
   return { color: MAT_SIDEWALK.color, h: 1 };
 }
 

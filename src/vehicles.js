@@ -10,10 +10,10 @@ import {
 } from "./city.js";
 
 /** Target gap between car centers along a lane (map cells). */
-const SPACING_NEAR = 4.5;
-const SPACING_FAR = 9;
+const SPACING_NEAR = 13.5;
+const SPACING_FAR = 27;
 /** Soft cap so a wide zoom does not explode instance count. */
-const MAX_CARS = 900;
+const MAX_CARS = 300;
 const VIEW_PAD = 24;
 const STOP_MARGIN = 2.0;
 const MIN_GAP = 3.2;
@@ -43,6 +43,22 @@ const LAMP_RED = [1.0, 0.18, 0.12];
 const LAMP_YELLOW = [1.0, 0.78, 0.12];
 const LAMP_GREEN = [0.15, 0.95, 0.35];
 const LAMP_DIM = [0.12, 0.12, 0.12];
+
+/** Colored pool under each lit traffic signal head. */
+const SIGNAL_LIGHT_RADIUS = 7;
+const SIGNAL_LIGHT_INTENSITY = 0.85;
+
+/** Warm pool stamped a short way ahead of each car (tiny radius keeps cost low). */
+const HEADLIGHT_COLOR = [1.0, 0.92, 0.72];
+const HEADLIGHT_RADIUS = 3.2;
+const HEADLIGHT_INTENSITY = 0.5;
+const HEADLIGHT_BEAM = 1.5;
+
+/** Dim red pool stamped behind each car. */
+const TAILLIGHT_COLOR = [1.0, 0.12, 0.08];
+const TAILLIGHT_RADIUS = 2.4;
+const TAILLIGHT_INTENSITY = 0.35;
+const TAILLIGHT_BEAM = 1.2;
 
 /** Lane t-values within a road: two each direction. */
 const LANES = [
@@ -205,7 +221,7 @@ function pushCar(data, count, maxCount, x, z, alongX, dir, color, pushBox) {
     color[1] * CABIN_SHADE,
     color[2] * CABIN_SHADE,
   ];
-  return pushBox(
+  count = pushBox(
     data,
     count,
     cx,
@@ -216,6 +232,92 @@ function pushCar(data, count, maxCount, x, z, alongX, dir, color, pushBox) {
     csz,
     cabin
   );
+  if (count >= maxCount) return count;
+
+  // Sit just outside the body so emissive faces don't z-fight the chassis.
+  const hlDepth = 0.1;
+  const hlSize = 0.16;
+  const front = (bodyL * 0.5 + hlDepth * 0.5) * dir;
+  const back = -(bodyL * 0.5 + hlDepth * 0.5) * dir;
+  const side = bodyW * 0.28;
+  const hy = bodyY * 0.55;
+  if (alongX) {
+    count = pushBox(
+      data, count, x + front, hy, z - side, hlDepth, hlSize, hlSize, HEADLIGHT_COLOR, 1
+    );
+    if (count >= maxCount) return count;
+    count = pushBox(
+      data, count, x + front, hy, z + side, hlDepth, hlSize, hlSize, HEADLIGHT_COLOR, 1
+    );
+    if (count >= maxCount) return count;
+    count = pushBox(
+      data, count, x + back, hy, z - side, hlDepth, hlSize, hlSize, TAILLIGHT_COLOR, 1
+    );
+    if (count >= maxCount) return count;
+    return pushBox(
+      data, count, x + back, hy, z + side, hlDepth, hlSize, hlSize, TAILLIGHT_COLOR, 1
+    );
+  }
+  count = pushBox(
+    data, count, x - side, hy, z + front, hlSize, hlSize, hlDepth, HEADLIGHT_COLOR, 1
+  );
+  if (count >= maxCount) return count;
+  count = pushBox(
+    data, count, x + side, hy, z + front, hlSize, hlSize, hlDepth, HEADLIGHT_COLOR, 1
+  );
+  if (count >= maxCount) return count;
+  count = pushBox(
+    data, count, x - side, hy, z + back, hlSize, hlSize, hlDepth, TAILLIGHT_COLOR, 1
+  );
+  if (count >= maxCount) return count;
+  return pushBox(
+    data, count, x + side, hy, z + back, hlSize, hlSize, hlDepth, TAILLIGHT_COLOR, 1
+  );
+}
+
+/**
+ * Stamp short-range pools ahead/behind each car onto the tile lightmap.
+ * Uses last-frame positions (one-frame lag is invisible at this scale).
+ * @param {import("./lighting.js").TileLightmap} lightmap
+ */
+export function stampCarLights(lightmap) {
+  const x0 = lightmap.originX;
+  const z0 = lightmap.originZ;
+  const x1 = x0 + lightmap.w;
+  const z1 = z0 + lightmap.h;
+  const pad = Math.max(
+    HEADLIGHT_RADIUS + HEADLIGHT_BEAM,
+    TAILLIGHT_RADIUS + TAILLIGHT_BEAM
+  );
+
+  for (let i = 0; i < cars.length; i++) {
+    const car = cars[i];
+    if (car.dead) continue;
+    const dir = LANES[car.lane].dir;
+    const x = car.alongX ? car.along : car.fixed;
+    const z = car.alongX ? car.fixed : car.along;
+    if (x < x0 - pad || x > x1 + pad || z < z0 - pad || z > z1 + pad) continue;
+
+    const hx = car.alongX ? x + dir * HEADLIGHT_BEAM : x;
+    const hz = car.alongX ? z : z + dir * HEADLIGHT_BEAM;
+    lightmap.stampLamp(
+      hx,
+      hz,
+      HEADLIGHT_RADIUS,
+      HEADLIGHT_COLOR,
+      HEADLIGHT_INTENSITY
+    );
+
+    const tx = car.alongX ? x - dir * TAILLIGHT_BEAM : x;
+    const tz = car.alongX ? z : z - dir * TAILLIGHT_BEAM;
+    lightmap.stampLamp(
+      tx,
+      tz,
+      TAILLIGHT_RADIUS,
+      TAILLIGHT_COLOR,
+      TAILLIGHT_INTENSITY
+    );
+  }
 }
 
 function paintSignalHead(data, count, maxCount, x, y, z, mode, pushBox) {
@@ -260,6 +362,72 @@ function signalMode(go, yellow) {
   if (!go) return "red";
   if (yellow) return "yellow";
   return "green";
+}
+
+function signalColor(mode) {
+  if (mode === "yellow") return LAMP_YELLOW;
+  if (mode === "green") return LAMP_GREEN;
+  return LAMP_RED;
+}
+
+/**
+ * Stamp red/yellow/green pools at each lit signal head in the lightmap rect.
+ * @param {import("./lighting.js").TileLightmap} lightmap
+ * @param {number} timeSec
+ */
+export function stampSignalLights(lightmap, timeSec) {
+  const x0 = lightmap.originX;
+  const z0 = lightmap.originZ;
+  const x1 = x0 + lightmap.w;
+  const z1 = z0 + lightmap.h;
+  const pad = SIGNAL_LIGHT_RADIUS;
+
+  const ave0 = Math.max(0, Math.floor((x0 - pad - ROAD_W) / STRIDE_X));
+  const ave1 = Math.min(BLOCKS_X, Math.floor((x1 + pad) / STRIDE_X) + 1);
+  const s0 = Math.max(0, Math.floor((z0 - pad - ROAD_H) / STRIDE_Y));
+  const s1 = Math.min(BLOCKS_Y, Math.floor((z1 + pad) / STRIDE_Y) + 1);
+
+  for (let s = s0; s <= s1; s++) {
+    const street = BLOCKS_Y - s;
+    const zy = streetY(street);
+    if (zy + ROAD_H < z0 - pad || zy > z1 + pad) continue;
+    for (let ave = ave0; ave <= ave1; ave++) {
+      const ax = avenueX(ave);
+      if (ax + ROAD_W < x0 - pad || ax > x1 + pad) continue;
+
+      const state = lightState(timeSec, ave, street);
+      const aveColor = signalColor(signalMode(state.avenueGo, state.avenueYellow));
+      const streetColor = signalColor(signalMode(state.streetGo, state.streetYellow));
+      const inset = 0.7;
+
+      const corners = [
+        { x: ax + inset, z: zy + inset },
+        { x: ax + ROAD_W - inset, z: zy + inset },
+        { x: ax + inset, z: zy + ROAD_H - inset },
+        { x: ax + ROAD_W - inset, z: zy + ROAD_H - inset },
+      ];
+
+      for (let c = 0; c < corners.length; c++) {
+        const p = corners[c];
+        // Avenue-facing head (offset along Z).
+        lightmap.stampLamp(
+          p.x,
+          p.z - 0.3,
+          SIGNAL_LIGHT_RADIUS,
+          aveColor,
+          SIGNAL_LIGHT_INTENSITY
+        );
+        // Street-facing head (offset along X).
+        lightmap.stampLamp(
+          p.x - 0.3,
+          p.z,
+          SIGNAL_LIGHT_RADIUS,
+          streetColor,
+          SIGNAL_LIGHT_INTENSITY
+        );
+      }
+    }
+  }
 }
 
 function paintIntersectionLights(data, count, maxCount, timeSec, x0, z0, x1, z1, pushBox) {
