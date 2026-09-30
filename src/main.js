@@ -19,6 +19,7 @@ import {
   MAT_SKYSCRAPER,
   MAT_STREETLAMP,
   MAT_WINDOW,
+  MAT_WINDOW_LIT,
 } from "./materials.js";
 import {
   TileLightmap,
@@ -47,6 +48,8 @@ const WINDOW_INSET = 0.08;
 const WINDOW_PITCH = 1.2;
 /** Keep panes clear of building corners. */
 const WINDOW_MARGIN = 0.85;
+/** Fraction of panes that glow (stable per world position). */
+const WINDOW_LIT_CHANCE = 0.32;
 
 const canvas = document.querySelector("#view");
 const infoValue = document.querySelector("#info-value");
@@ -94,8 +97,37 @@ function gridCenters(start, end, pitch) {
   return centers;
 }
 
+/** Deterministic 0..1 hash from pane world position + face id. */
+function windowLitRoll(x, y, z, face) {
+  let h =
+    Math.imul(Math.floor(x * 8 + 0.5) + 1, 374761393) ^
+    Math.imul(Math.floor(y * 8 + 0.5) + 1, 668265263) ^
+    Math.imul(Math.floor(z * 8 + 0.5) + 1, 1274126177) ^
+    Math.imul(face + 1, 2246822519);
+  h = Math.imul(h ^ (h >>> 15), h | 1);
+  h ^= h + Math.imul(h ^ (h >>> 7), h | 61);
+  return ((h ^ (h >>> 14)) >>> 0) / 4294967296;
+}
+
+function pushWindow(data, count, ox, oy, oz, sx, sy, sz, face) {
+  const lit = windowLitRoll(ox, oy, oz, face) < WINDOW_LIT_CHANCE;
+  return pushBox(
+    data,
+    count,
+    ox,
+    oy,
+    oz,
+    sx,
+    sy,
+    sz,
+    lit ? MAT_WINDOW_LIT.color : MAT_WINDOW.color,
+    lit ? 1 : 0,
+    lit ? 0 : 1
+  );
+}
+
 /**
- * Glossy black window panes inset into the four vertical faces.
+ * Glossy black / lit window panes inset into the four vertical faces.
  * One row per occupied floor (excluding roof); columns along each facade.
  */
 function paintBuildingWindows(data, count, maxCount, ox, oz, b) {
@@ -111,7 +143,6 @@ function paintBuildingWindows(data, count, maxCount, ox, oz, b) {
   const zs = gridCenters(z0, z1, WINDOW_PITCH);
   if (xs.length === 0 && zs.length === 0) return count;
 
-  const color = MAT_WINDOW.color;
   const depth = WINDOW_INSET;
   // Mostly buried in the wall; a hair of the pane sticks out so it's visible.
   const faceN = oz + halfD - depth * 0.5 + 0.015;
@@ -122,7 +153,7 @@ function paintBuildingWindows(data, count, maxCount, ox, oz, b) {
   for (let layer = 0; layer < b.h - 1 && count < maxCount; layer++) {
     const cy = layer + 0.5;
     for (let i = 0; i < xs.length && count < maxCount; i++) {
-      count = pushBox(
+      count = pushWindow(
         data,
         count,
         xs[i],
@@ -131,12 +162,10 @@ function paintBuildingWindows(data, count, maxCount, ox, oz, b) {
         WINDOW_SPAN,
         WINDOW_SPAN,
         depth,
-        color,
-        0,
-        1
+        0
       );
       if (count >= maxCount) return count;
-      count = pushBox(
+      count = pushWindow(
         data,
         count,
         xs[i],
@@ -145,13 +174,11 @@ function paintBuildingWindows(data, count, maxCount, ox, oz, b) {
         WINDOW_SPAN,
         WINDOW_SPAN,
         depth,
-        color,
-        0,
         1
       );
     }
     for (let i = 0; i < zs.length && count < maxCount; i++) {
-      count = pushBox(
+      count = pushWindow(
         data,
         count,
         faceE,
@@ -160,12 +187,10 @@ function paintBuildingWindows(data, count, maxCount, ox, oz, b) {
         depth,
         WINDOW_SPAN,
         WINDOW_SPAN,
-        color,
-        0,
-        1
+        2
       );
       if (count >= maxCount) return count;
-      count = pushBox(
+      count = pushWindow(
         data,
         count,
         faceW,
@@ -174,9 +199,7 @@ function paintBuildingWindows(data, count, maxCount, ox, oz, b) {
         depth,
         WINDOW_SPAN,
         WINDOW_SPAN,
-        color,
-        0,
-        1
+        3
       );
     }
   }

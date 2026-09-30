@@ -28,10 +28,17 @@ export const MAT_WINDOW = {
   fill: "block",
 };
 
+export const MAT_WINDOW_LIT = {
+  char: "w",
+  color: [0xc4 / 255, 0xa0 / 255, 0x5c / 255],
+  fill: "block",
+};
+
 export const MATERIALS = [
   MAT_SIDEWALK,
   MAT_STREETLAMP,
   MAT_SKYSCRAPER,
   MAT_ROOF,
   MAT_WINDOW,
+  MAT_WINDOW_LIT,
 ];
