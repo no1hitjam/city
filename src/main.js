@@ -20,15 +20,16 @@ import {
   LAMP_RADIUS,
   LIGHT_TEX_SCALE,
   HEIGHT_FALLOFF,
+  WET_SPECULAR,
 } from "./lighting.js";
 import { paintFleet, stampCarLights, stampSignalLights } from "./vehicles.js";
 
-const ROAD_COLOR = [0x0c / 255, 0x0e / 255, 0x14 / 255];
+const ROAD_COLOR = [0x08 / 255, 0x09 / 255, 0x0e / 255];
 const LAMP_POLE_COLOR = [0x2a / 255, 0x2c / 255, 0x32 / 255];
 const LAMP_HOUSING_COLOR = [0x14 / 255, 0x14 / 255, 0x18 / 255];
 const MIN_ZOOM = 8;
 const MAX_ZOOM = 80;
-const FLOATS_PER = 10;
+const FLOATS_PER = 11;
 const LAMP_GRID = 16;
 const LAMP_POLE_H = 3.4;
 
@@ -51,7 +52,7 @@ function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
-function pushBox(data, count, ox, oy, oz, sx, sy, sz, color, emissive = 0) {
+function pushBox(data, count, ox, oy, oz, sx, sy, sz, color, emissive = 0, gloss = 0) {
   const i = count * FLOATS_PER;
   data[i] = ox;
   data[i + 1] = oy;
@@ -63,6 +64,7 @@ function pushBox(data, count, ox, oy, oz, sx, sy, sz, color, emissive = 0) {
   data[i + 7] = color[1];
   data[i + 8] = color[2];
   data[i + 9] = emissive;
+  data[i + 10] = gloss;
   return count + 1;
 }
 
@@ -154,7 +156,7 @@ function rebuildLightmap(x0, z0, x1, z1) {
   stampSignalLights(lightmap, timeSec);
 
   lightmap.toTextureBytes();
-  renderer.uploadLightmap(lightmap, LIGHT_TEX_SCALE, HEIGHT_FALLOFF);
+  renderer.uploadLightmap(lightmap, LIGHT_TEX_SCALE, HEIGHT_FALLOFF, WET_SPECULAR);
 }
 
 function paintVoxels() {
@@ -181,7 +183,9 @@ function paintVoxels() {
     groundW,
     1,
     groundD,
-    ROAD_COLOR
+    ROAD_COLOR,
+    0,
+    1
   );
 
   const bx0 = clamp(Math.floor((x0 - ROAD_W) / STRIDE_X), 0, BLOCKS_X - 1);
@@ -241,7 +245,9 @@ function paintVoxels() {
         1,
         vox.h,
         1,
-        vox.color
+        vox.color,
+        0,
+        1
       );
       if (count >= maxCount) break;
       if (isStreetlampAt(x, z)) {

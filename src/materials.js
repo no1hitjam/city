@@ -1,6 +1,6 @@
 export const MAT_SIDEWALK = {
   char: "#",
-  color: [0x44 / 255, 0x44 / 255, 0x44 / 255],
+  color: [0x2e / 255, 0x30 / 255, 0x34 / 255],
   fill: "block",
 };
 
@@ -12,7 +12,7 @@ export const MAT_STREETLAMP = {
 
 export const MAT_SKYSCRAPER = {
   char: "H",
-  color: [0x7a / 255, 0x9e / 255, 0x6e / 255],
+  color: [0x8a / 255, 0xb0 / 255, 0x7c / 255],
   fill: "block",
 };
 

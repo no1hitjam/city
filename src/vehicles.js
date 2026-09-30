@@ -50,17 +50,17 @@ const LAMP_DIM = [0.12, 0.12, 0.12];
 const SIGNAL_LIGHT_RADIUS = 7;
 const SIGNAL_LIGHT_INTENSITY = 0.85;
 
-/** Warm pool stamped a short way ahead of each car (tiny radius keeps cost low). */
+/** Warm pool under/near each car (kept tight so wet streaks don't ghost). */
 const HEADLIGHT_COLOR = [1.0, 0.92, 0.72];
-const HEADLIGHT_RADIUS = 3.2;
-const HEADLIGHT_INTENSITY = 0.5;
-const HEADLIGHT_BEAM = 1.5;
+const HEADLIGHT_RADIUS = 2.4;
+const HEADLIGHT_INTENSITY = 0.38;
+const HEADLIGHT_BEAM = 0.55;
 
-/** Dim red pool stamped behind each car. */
+/** Dim red pool near the rear of each car. */
 const TAILLIGHT_COLOR = [1.0, 0.12, 0.08];
-const TAILLIGHT_RADIUS = 2.4;
-const TAILLIGHT_INTENSITY = 0.35;
-const TAILLIGHT_BEAM = 1.2;
+const TAILLIGHT_RADIUS = 1.8;
+const TAILLIGHT_INTENSITY = 0.28;
+const TAILLIGHT_BEAM = 0.4;
 
 /** Lane t-values within a road: two each direction. */
 const LANES = [

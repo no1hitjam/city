@@ -5,14 +5,17 @@ export const LAMP_RADIUS = 14;
 /** Peak brightness at the lamp tile. */
 export const LAMP_INTENSITY = 0.95;
 /** Soft night fill so unlit tiles stay readable. */
-export const AMBIENT_LIGHT = [0.055, 0.07, 0.06];
+export const AMBIENT_LIGHT = [0.08, 0.095, 0.09];
 /** Extra attenuation per voxel of height above ground. */
-export const HEIGHT_FALLOFF = 0.3;
+export const HEIGHT_FALLOFF = 0.16;
 /** Cool blue lamp tint (matches streetlamp material). */
 export const LAMP_COLOR = MAT_STREETLAMP.color;
 
 /** Decode scale baked into the RGBA8 lightmap texture. */
 export const LIGHT_TEX_SCALE = 2.5;
+
+/** Wet-ground specular strength (shader uniform). */
+export const WET_SPECULAR = 0.35;
 
 function falloff(dist, radius) {
   if (dist >= radius) return 0;

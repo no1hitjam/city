@@ -7,23 +7,29 @@ layout(location = 2) in vec3 aOffset;
 layout(location = 3) in vec3 aScale;
 layout(location = 4) in vec3 aColor;
 layout(location = 5) in float aEmissive;
+layout(location = 6) in float aGloss;
 
 uniform mat4 uVP;
 uniform vec3 uLightDir;
 
 out vec3 vWorld;
+out vec3 vNormal;
 out vec3 vAlbedo;
 out float vShade;
 out float vEmissive;
+out float vGloss;
 
 void main() {
   vec3 world = aPos * aScale + aOffset;
   gl_Position = uVP * vec4(world, 1.0);
-  float ndl = max(dot(normalize(aNormal), normalize(uLightDir)), 0.0);
+  vec3 nrm = normalize(aNormal);
+  float ndl = max(dot(nrm, normalize(uLightDir)), 0.0);
   vWorld = world;
+  vNormal = nrm;
   vAlbedo = aColor;
   vShade = 0.4 + 0.6 * ndl;
   vEmissive = aEmissive;
+  vGloss = aGloss;
 }
 `;
 
@@ -36,27 +42,71 @@ uniform vec2 uLightOrigin;
 uniform vec2 uLightSize;
 uniform float uLightScale;
 uniform float uHeightFalloff;
+uniform vec3 uCameraPos;
+uniform float uWetSpecular;
 
 in vec3 vWorld;
+in vec3 vNormal;
 in vec3 vAlbedo;
 in float vShade;
 in float vEmissive;
+in float vGloss;
 out vec4 oColor;
 
-vec3 sampleTileLight(vec3 world) {
-  ivec2 tile = ivec2(floor(world.xz));
+vec3 fetchTile(ivec2 tile) {
   ivec2 origin = ivec2(uLightOrigin);
   ivec2 size = ivec2(uLightSize);
   ivec2 cell = clamp(tile - origin, ivec2(0), size - ivec2(1));
-  vec3 L = texelFetch(uLightmap, cell, 0).rgb * uLightScale;
-  // Step height attenuation per voxel layer, not smoothly.
-  float layer = floor(max(world.y, 0.0));
-  float hf = 1.0 / (1.0 + layer * uHeightFalloff);
-  return L * hf;
+  return texelFetch(uLightmap, cell, 0).rgb * uLightScale;
+}
+
+float heightAtten(float y) {
+  float layer = floor(max(y, 0.0));
+  return 1.0 / (1.0 + layer * uHeightFalloff);
+}
+
+vec3 sampleTileLight(vec3 world) {
+  return fetchTile(ivec2(floor(world.xz))) * heightAtten(world.y);
+}
+
+float luma(vec3 c) {
+  return dot(c, vec3(0.2126, 0.7152, 0.0722));
+}
+
+// Wet sheen from this tile's light only — no cross-tile blending.
+vec3 wetReflection(vec3 world, vec3 N, vec3 V, float wet) {
+  ivec2 tile = ivec2(floor(world.xz));
+  vec3 Lc = fetchTile(tile);
+  // Neighbor taps only estimate light direction, not color.
+  float gx = luma(fetchTile(tile + ivec2(1, 0))) - luma(fetchTile(tile - ivec2(1, 0)));
+  float gz = luma(fetchTile(tile + ivec2(0, 1))) - luma(fetchTile(tile - ivec2(0, 1)));
+  vec3 Ldir = normalize(vec3(-gx, 0.55, -gz) + vec3(1e-4));
+
+  float ndv = max(dot(N, V), 0.0);
+  float fresnel = mix(0.18, 0.8, pow(1.0 - ndv, 2.6));
+
+  vec3 H = normalize(Ldir + V);
+  float spec = pow(max(dot(N, H), 0.0), 56.0);
+  float softSpec = pow(max(dot(N, H), 0.0), 14.0);
+
+  vec3 glow = max(Lc - vec3(0.09), vec3(0.0));
+
+  return wet * uWetSpecular * fresnel * (
+    glow * (spec * 0.75 + softSpec * 0.15) +
+    pow(glow, vec3(2.4)) * 0.12
+  );
 }
 
 void main() {
-  vec3 lit = vAlbedo * sampleTileLight(vWorld) * vShade;
+  vec3 N = normalize(vNormal);
+  vec3 V = normalize(uCameraPos - vWorld);
+  float wet = vGloss * step(0.55, N.y);
+
+  vec3 albedo = mix(vAlbedo, vAlbedo * 0.62, wet * 0.6);
+  float shade = mix(vShade, mix(vShade, 1.0, 0.08), wet);
+  vec3 lit = albedo * sampleTileLight(vWorld) * mix(1.0, 0.88, wet) * shade;
+  lit += wetReflection(vWorld, N, V, wet);
+
   oColor = vec4(mix(lit, vAlbedo * 1.35, vEmissive), 1.0);
 }
 `;
@@ -253,7 +303,7 @@ function buildCubeMesh() {
   };
 }
 
-const FLOATS_PER_INSTANCE = 10;
+const FLOATS_PER_INSTANCE = 11;
 
 export class VoxelRenderer {
   constructor(canvas) {
@@ -283,6 +333,8 @@ export class VoxelRenderer {
     this.lightSize = new Float32Array([1, 1]);
     this.lightScale = 2.5;
     this.heightFalloff = 0.11;
+    this.cameraPos = new Float32Array([0, 20, 0]);
+    this.wetSpecular = 0.35;
 
     const vert = compile(gl, gl.VERTEX_SHADER, VERT_SRC);
     const frag = compile(gl, gl.FRAGMENT_SHADER, FRAG_SRC);
@@ -297,6 +349,8 @@ export class VoxelRenderer {
     this.locLightSize = gl.getUniformLocation(this.program, "uLightSize");
     this.locLightScale = gl.getUniformLocation(this.program, "uLightScale");
     this.locHeightFalloff = gl.getUniformLocation(this.program, "uHeightFalloff");
+    this.locCameraPos = gl.getUniformLocation(this.program, "uCameraPos");
+    this.locWetSpecular = gl.getUniformLocation(this.program, "uWetSpecular");
 
     const mesh = buildCubeMesh();
     this.indexCount = mesh.indices.length;
@@ -336,6 +390,9 @@ export class VoxelRenderer {
     gl.enableVertexAttribArray(5);
     gl.vertexAttribPointer(5, 1, gl.FLOAT, false, stride, 36);
     gl.vertexAttribDivisor(5, 1);
+    gl.enableVertexAttribArray(6);
+    gl.vertexAttribPointer(6, 1, gl.FLOAT, false, stride, 40);
+    gl.vertexAttribDivisor(6, 1);
 
     this.lightTex = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, this.lightTex);
@@ -422,8 +479,9 @@ export class VoxelRenderer {
    * @param {{ originX: number, originZ: number, w: number, h: number, rgba: Uint8Array }} map
    * @param {number} decodeScale
    * @param {number} heightFalloff
+   * @param {number} [wetSpecular]
    */
-  uploadLightmap(map, decodeScale, heightFalloff) {
+  uploadLightmap(map, decodeScale, heightFalloff, wetSpecular) {
     const gl = this.gl;
     this.lightOrigin[0] = map.originX;
     this.lightOrigin[1] = map.originZ;
@@ -431,6 +489,7 @@ export class VoxelRenderer {
     this.lightSize[1] = map.h;
     this.lightScale = decodeScale;
     this.heightFalloff = heightFalloff;
+    if (wetSpecular != null) this.wetSpecular = wetSpecular;
     gl.bindTexture(gl.TEXTURE_2D, this.lightTex);
     gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
     gl.texImage2D(
@@ -453,6 +512,9 @@ export class VoxelRenderer {
     const eyeX = this.camX + Math.sin(this.yaw) * ch;
     const eyeZ = this.camZ + Math.cos(this.yaw) * ch;
     const eye = [eyeX, cy, eyeZ];
+    this.cameraPos[0] = eyeX;
+    this.cameraPos[1] = cy;
+    this.cameraPos[2] = eyeZ;
     const center = [this.camX, 0, this.camZ];
     const up = [0, 1, 0];
 
@@ -480,6 +542,8 @@ export class VoxelRenderer {
     gl.uniform2fv(this.locLightSize, this.lightSize);
     gl.uniform1f(this.locLightScale, this.lightScale);
     gl.uniform1f(this.locHeightFalloff, this.heightFalloff);
+    gl.uniform3fv(this.locCameraPos, this.cameraPos);
+    gl.uniform1f(this.locWetSpecular, this.wetSpecular);
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.lightTex);
     gl.bindVertexArray(this.vao);
